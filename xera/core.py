@@ -34,9 +34,9 @@ class Buffer:
         return f"Buffer({self.value!r})"
 
 
-jax.tree_util.register_pytree_node(
+jax.tree_util.register_pytree_with_keys(
     Buffer,
-    lambda s: ((s.value,), None),
+    lambda s: ([(jax.tree_util.GetAttrKey("value"), s.value)], None),
     lambda aux, children: Buffer(children[0]),
 )
 
@@ -47,10 +47,11 @@ class Module:
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         cls = dataclasses.dataclass(cls, eq=False, repr=False, init=False)
-        jax.tree_util.register_pytree_node(
+        jax.tree_util.register_pytree_with_keys(
             cls,
-            cls._tree_flatten,
+            cls._tree_flatten_with_keys,
             cls._tree_unflatten,
+            cls._tree_flatten,
         )
 
     def __new__(cls, *args, **kwargs):
@@ -133,6 +134,15 @@ class Module:
                 static_vals.append(val)
         aux_data = (tuple(dynamic_names), tuple(static_names), tuple(static_vals))
         return tuple(dynamic_vals), aux_data
+
+    def _tree_flatten_with_keys(self):
+        dynamic_vals, aux_data = self._tree_flatten()
+        dynamic_names = aux_data[0]
+        keyed = [
+            (jax.tree_util.GetAttrKey(name), val)
+            for name, val in zip(dynamic_names, dynamic_vals)
+        ]
+        return keyed, aux_data
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
