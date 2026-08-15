@@ -50,7 +50,7 @@ class State:
                 dynamic_vals.append(val)
             else:
                 
-                from .. import Module as _Module
+                from ..core import Module as _Module
                 if isinstance(val, _Module):
                     dynamic_names.append(name)
                     dynamic_vals.append(val)

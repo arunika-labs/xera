@@ -22,21 +22,22 @@ class RNGPool:
         return subs
 
 
-class State:
+class Buffer:
     
+
     __slots__ = ("value",)
 
     def __init__(self, value):
         self.value = value
 
     def __repr__(self):
-        return f"State({self.value!r})"
+        return f"Buffer({self.value!r})"
 
 
 jax.tree_util.register_pytree_node(
-    State,
+    Buffer,
     lambda s: ((s.value,), None),
-    lambda aux, children: State(children[0]),
+    lambda aux, children: Buffer(children[0]),
 )
 
 
@@ -96,7 +97,7 @@ class Module:
                 out[name] = val.params_dict()
             elif isinstance(val, jnp.ndarray):
                 out[name] = val
-            elif isinstance(val, State):
+            elif isinstance(val, Buffer):
                 continue  
             elif isinstance(val, (list, tuple)) and val and isinstance(val[0], Module):
                 out[name] = [v.params_dict() for v in val]
@@ -112,7 +113,7 @@ class Module:
                 sub = val.state_dict()
                 if sub:
                     out[name] = sub
-            elif isinstance(val, State):
+            elif isinstance(val, Buffer):
                 out[name] = val.value
         return out
 
@@ -121,7 +122,7 @@ class Module:
         dynamic_names, dynamic_vals = [], []
         static_names, static_vals = [], []
         for name, val in self.__dict__.items():
-            if isinstance(val, (jnp.ndarray, Module, State)) or val is None:
+            if isinstance(val, (jnp.ndarray, Module, Buffer)) or val is None:
                 dynamic_names.append(name)
                 dynamic_vals.append(val)
             elif isinstance(val, list) and val and all(isinstance(v, Module) for v in val):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import jax.numpy as jnp
-from ..core import Module, State, param
+from ..core import Module, Buffer, param
 from .. import initializers
 
 
@@ -31,8 +31,8 @@ class BatchNorm(Module):
     def setup(self):
         self.gamma = param(self.rng(), initializers.ones(), (self.dim,))
         self.beta = param(self.rng(), initializers.zeros(), (self.dim,))
-        self.running_mean = State(jnp.zeros(self.dim))
-        self.running_var = State(jnp.ones(self.dim))
+        self.running_mean = Buffer(jnp.zeros(self.dim))
+        self.running_var = Buffer(jnp.ones(self.dim))
 
     def __call__(self, x, *, training=True):
         if training:
@@ -54,8 +54,8 @@ def _replace_state(bn, new_mean, new_var):
     
     new_bn = object.__new__(type(bn))
     new_bn.__dict__.update(bn.__dict__)
-    new_bn.running_mean = State(new_mean)
-    new_bn.running_var = State(new_var)
+    new_bn.running_mean = Buffer(new_mean)
+    new_bn.running_var = Buffer(new_var)
     return new_bn
 
 

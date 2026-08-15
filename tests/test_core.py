@@ -4,11 +4,11 @@ import jax.numpy as jnp
 import optax
 import numpy as np
 import xera
-import xera.loom as L
+import xera.loom as loom
 
 
 def test_forward_and_auto_rng_split():
-    block = L.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
+    block = loom.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 8, 32))
     out = block(x, deterministic=True)
     assert out.shape == (2, 8, 32)
@@ -16,7 +16,7 @@ def test_forward_and_auto_rng_split():
 
 
 def test_jit_and_grad():
-    block = L.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
+    block = loom.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 8, 32))
 
     fwd = jax.jit(lambda b, x: b(x, deterministic=True))
@@ -28,7 +28,7 @@ def test_jit_and_grad():
 
 
 def test_optax_training_step():
-    block = L.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
+    block = loom.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 4, 16))
     y = jax.random.normal(jax.random.PRNGKey(2), (2, 4, 16))
 
@@ -48,14 +48,14 @@ def test_optax_training_step():
 
 
 def test_params_dict():
-    dense = L.Dense(4, 8, key=jax.random.PRNGKey(0))
+    dense = loom.Dense(4, 8, key=jax.random.PRNGKey(0))
     pd = dense.params_dict()
     assert set(pd.keys()) == {"weight", "bias"}
     assert pd["weight"].shape == (4, 8)
 
 
 def test_batchnorm_state_separate_from_params():
-    bn = L.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
+    bn = loom.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (8, 16))
     _, bn2 = bn(x, training=True)
     assert not jnp.allclose(bn.running_mean.value, bn2.running_mean.value)
@@ -63,15 +63,25 @@ def test_batchnorm_state_separate_from_params():
     assert jnp.allclose(bn.beta, bn2.beta)
 
 
+def test_top_level_api_aliases():
+    import xera.loom as L
+    import xera.weave as W
+
+    assert xera.L is L
+    assert xera.W is W
+    assert xera.L is xera.loom
+    assert xera.W is xera.weave
+
+
 def test_custom_module_with_loom():
-    class MLP(L.Module):
+    class MLP(loom.Module):
         in_features: int
         hidden: int
         out_features: int
 
         def setup(self):
-            self.fc1 = L.Dense(self.in_features, self.hidden, key=self.rng())
-            self.fc2 = L.Dense(self.hidden, self.out_features, key=self.rng())
+            self.fc1 = loom.Dense(self.in_features, self.hidden, key=self.rng())
+            self.fc2 = loom.Dense(self.hidden, self.out_features, key=self.rng())
 
         def __call__(self, x):
             return self.fc2(jax.nn.relu(self.fc1(x)))
