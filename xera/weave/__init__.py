@@ -3,7 +3,19 @@
 from .state import State
 from .loop import Loop
 from .train import Train
-from .optimizer import Optimizer, apply_updates, SGDMomentum, AdamW, Lion, Muon
+from .optimizer import (
+    Optimizer,
+    apply_updates,
+    SGDMomentum,
+    AdamW,
+    Lion,
+    MuonCore,
+    Muon,
+    Clip,
+    Schedule,
+    Accumulate,
+    Partition,
+)
 
 __all__ = [
     "State",
@@ -14,5 +26,10 @@ __all__ = [
     "SGDMomentum",
     "AdamW",
     "Lion",
+    "MuonCore",
     "Muon",
+    "Clip",
+    "Schedule",
+    "Accumulate",
+    "Partition",
 ]
