@@ -98,4 +98,54 @@ class Conv(Module):
         return y
 
 
-__all__ = ["Conv"]
+class ConvTranspose(Module):
+    """N-dimensional transposed convolution ("deconvolution"), same
+    rank-agnostic dispatch as `Conv` (rank inferred from
+    `len(kernel_size)`). The upsampling counterpart to `Conv` -- typical
+    use is a decoder/generator stack that needs to grow spatial
+    resolution back up, mirroring an encoder built from `Conv`.
+
+    Same channel-last layout and kernel shape convention as `Conv`:
+    input/output `(batch, *spatial, channels)`, kernel `(*kernel_size,
+    in_channels // groups, out_channels)`. `stride` here controls the
+    upsampling factor (stride 2 roughly doubles spatial size), unlike
+    `Conv` where stride shrinks it -- this is `lax.conv_transpose`'s
+    normal semantics, not a xera-specific inversion.
+    """
+
+    in_channels: int
+    out_channels: int
+    kernel_size: tuple
+    stride: int | tuple = 1
+    padding: str | tuple = "SAME"
+    dilation: int | tuple = 1
+    use_bias: bool = True
+
+    def setup(self):
+        weight_shape = tuple(self.kernel_size) + (self.in_channels, self.out_channels)
+        self.weight = param(self.rng(), initializers.kaiming_normal(), weight_shape)
+        self.bias = (
+            param(self.rng(), initializers.zeros(), (self.out_channels,))
+            if self.use_bias else None
+        )
+
+    def __call__(self, x):
+        # x: (batch, *spatial, in_channels)
+        n_spatial = len(self.kernel_size)
+        stride = _as_tuple(self.stride, n_spatial)
+        dilation = _as_tuple(self.dilation, n_spatial)
+        padding = self.padding if isinstance(self.padding, str) else tuple(self.padding)
+
+        y = jax.lax.conv_transpose(
+            x, self.weight,
+            strides=stride,
+            padding=padding,
+            rhs_dilation=dilation,
+            dimension_numbers=_dimension_numbers(x.ndim),
+        )
+        if self.bias is not None:
+            y = y + self.bias
+        return y
+
+
+__all__ = ["Conv", "ConvTranspose"]

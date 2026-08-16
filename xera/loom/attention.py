@@ -125,4 +125,46 @@ class GroupedQueryAttention(Module):
         return self.out_proj(out)
 
 
-__all__ = ["MultiHeadAttention", "GroupedQueryAttention", "causal_mask"]
+class SelfAttention(Module):
+    """Single-head scaled dot-product attention. Self-attention when
+    called with just `x` (Q/K/V all from the same input); cross-attention
+    when a separate `context` is passed (Q from `x`, K/V from `context`)
+    -- something `MultiHeadAttention`/`GroupedQueryAttention` don't
+    support, since both hardcode a single `x` as the source for Q, K, and
+    V alike.
+
+    Not meant to replace `MultiHeadAttention(dim, num_heads=1)`, which
+    already gives identical self-attention math with the head-split
+    bookkeeping kept (so it composes with `use_rope`/multi-head code
+    paths unchanged). This exists for: (1) architectures that want plain
+    attention without any head-split/transpose overhead, and (2) cross-
+    attention, which nothing else in `loom` provides.
+    """
+    dim: int
+    dropout_rate: float = 0.0
+
+    def setup(self):
+        self.q_proj = Dense(self.dim, self.dim, key=self.rng())
+        self.k_proj = Dense(self.dim, self.dim, key=self.rng())
+        self.v_proj = Dense(self.dim, self.dim, key=self.rng())
+        self.out_proj = Dense(self.dim, self.dim, key=self.rng())
+        self.dropout = Dropout(self.dropout_rate, key=self.rng())
+
+    def __call__(self, x, *, context=None, mask=None, key=None, deterministic=True):
+        kv_source = context if context is not None else x
+
+        q = self.q_proj(x)                # (B, Tq, dim)
+        k = self.k_proj(kv_source)         # (B, Tk, dim)
+        v = self.v_proj(kv_source)         # (B, Tk, dim)
+
+        scores = jnp.einsum("btd,bsd->bts", q, k) / jnp.sqrt(self.dim)
+        if mask is not None:
+            scores = jnp.where(mask, scores, -jnp.inf)
+        attn = jax.nn.softmax(scores, axis=-1)
+        attn = self.dropout(attn, key=key, deterministic=deterministic)
+
+        out = jnp.einsum("bts,bsd->btd", attn, v)
+        return self.out_proj(out)
+
+
+__all__ = ["MultiHeadAttention", "GroupedQueryAttention", "SelfAttention", "causal_mask"]

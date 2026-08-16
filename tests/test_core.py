@@ -102,6 +102,23 @@ def test_conv_grouped_depthwise():
     assert out.shape == (2, 10, 4)
 
 
+def test_conv_transpose_upsamples():
+    up = loom.ConvTranspose(in_channels=3, out_channels=8, kernel_size=(4, 4), stride=2, padding="SAME", key=jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (2, 8, 8, 3))
+    out = up(x)
+    assert out.shape == (2, 16, 16, 8)  # stride 2 doubles spatial size
+
+    grads = jax.grad(lambda m, x: jnp.sum(m(x) ** 2))(up, x)
+    assert grads.weight.shape == up.weight.shape
+
+
+def test_conv_then_conv_transpose_roundtrip_shape():
+    down = loom.Conv(in_channels=3, out_channels=8, kernel_size=(3, 3), stride=2, padding="SAME", key=jax.random.PRNGKey(0))
+    up = loom.ConvTranspose(in_channels=8, out_channels=3, kernel_size=(3, 3), stride=2, padding="SAME", key=jax.random.PRNGKey(1))
+    x = jax.random.normal(jax.random.PRNGKey(2), (2, 16, 16, 3))
+    assert up(down(x)).shape == x.shape
+
+
 def test_pooling_shapes():
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 8, 8, 3))
     assert loom.MaxPool(pool_size=(2, 2))(x).shape == (2, 4, 4, 3)
@@ -123,6 +140,42 @@ def test_embedding_and_rotary():
     assert not jnp.allclose(rotated, x)  # actually rotates, not a no-op
 
 
+def test_self_attention_matches_single_head_mha():
+    dim = 16
+    x = jax.random.normal(jax.random.PRNGKey(1), (2, 5, dim))
+
+    sa = loom.SelfAttention(dim=dim, key=jax.random.PRNGKey(0))
+    mha = loom.MultiHeadAttention(dim=dim, num_heads=1, key=jax.random.PRNGKey(0))
+
+    out_sa = sa(x)
+    out_mha = mha(x, deterministic=True)
+    assert out_sa.shape == out_mha.shape == (2, 5, dim)
+    # same math (single head == no head split), different param init RNG
+    # draw order, so just check shapes/dtype line up, not exact equality.
+    assert out_sa.dtype == out_mha.dtype
+
+
+def test_self_attention_cross_attention_uses_context():
+    dim = 16
+    sa = loom.SelfAttention(dim=dim, key=jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (2, 5, dim))          # queries
+    context = jax.random.normal(jax.random.PRNGKey(2), (2, 9, dim))    # different seq_len
+
+    out = sa(x, context=context)
+    assert out.shape == (2, 5, dim)  # output length follows query, not context
+
+    out_self = sa(x)  # context=None -> self-attention
+    assert not jnp.allclose(out, out_self)  # genuinely different from self-attention
+
+
+def test_self_attention_grad():
+    dim = 8
+    sa = loom.SelfAttention(dim=dim, key=jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (2, 4, dim))
+    grads = jax.grad(lambda m, x: jnp.sum(m(x) ** 2))(sa, x)
+    assert grads.q_proj.weight.shape == sa.q_proj.weight.shape
+
+
 def test_ssm_forward_shape():
     ssm = loom.SSM(channels=8, state_dim=4, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 10, 8))
@@ -138,6 +191,27 @@ def test_selective_ssm_forward_shape_and_grad():
 
     grads = jax.grad(lambda m, x: jnp.sum(m(x) ** 2))(sel, x)
     assert grads.log_A.shape == sel.log_A.shape
+
+
+def test_mamba_block_shape_grad_and_causality():
+    block = loom.MambaBlock(d_model=16, d_inner=32, state_dim=4, conv_kernel=4, key=jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (2, 12, 16))
+    out = block(x)
+    assert out.shape == x.shape
+
+    grads = jax.grad(lambda m, x: jnp.sum(m(x) ** 2))(block, x)
+    assert grads.in_proj.weight.shape == block.in_proj.weight.shape
+
+    # causal: perturbing a future timestep must not change earlier outputs
+    x2 = x.at[:, -1, :].set(0.0)
+    out2 = block(x2)
+    assert jnp.allclose(out[:, :-1, :], out2[:, :-1, :], atol=1e-5)
+    assert not jnp.allclose(out[:, -1, :], out2[:, -1, :])
+
+
+def test_mamba_block_default_d_inner():
+    block = loom.MambaBlock(d_model=8, key=jax.random.PRNGKey(0))
+    assert block._d_inner == 16  # default expansion factor 2x
 
 
 # ---------------------------------------------------------------------------

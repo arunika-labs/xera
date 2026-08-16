@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from ..core import Module, param
 from .. import initializers
 from .linear import Dense
+from .conv import Conv
 
 
 def _s4d_log_A_init(state_dim):
@@ -175,4 +176,50 @@ class SelectiveSSM(Module):
         return jnp.transpose(ys, (1, 0, 2))  # (batch, seq_len, d_inner)
 
 
-__all__ = ["SSM", "SelectiveSSM"]
+class MambaBlock(Module):
+    """The full Mamba block (Gu & Dao, 2023): input projection -> causal
+    depthwise `Conv` -> SiLU -> `SelectiveSSM` -> SiLU-gate -> output
+    projection. `SelectiveSSM` above is only the core recurrence; this is
+    the actual drop-in replacement for a `TransformerBlock`'s attention
+    sub-layer -- same "takes `(batch, seq_len, d_model)`, returns the same
+    shape" contract, so it composes into a `Sequential`/residual stack the
+    same way `TransformerBlock` does (residual add is left to the caller,
+    same convention as `MultiHeadAttention`/`MLP` inside `TransformerBlock`).
+
+    `d_inner` is the expanded inner width the SSM actually runs at
+    (default `2 * d_model`, the paper's expansion factor); `in_proj` maps
+    `d_model -> 2 * d_inner` in one matmul and splits the result into the
+    SSM branch and the parallel SiLU gate `z`. The depthwise `Conv` is
+    causally padded (`kernel_size - 1` on the left, `0` on the right) so
+    output length matches input length without leaking future timesteps.
+    """
+
+    d_model: int
+    d_inner: int = None
+    state_dim: int = 16
+    conv_kernel: int = 4
+    dt_rank: int = None
+
+    def setup(self):
+        d_inner = self.d_inner if self.d_inner is not None else self.d_model * 2
+        self._d_inner = d_inner
+
+        self.in_proj = Dense(self.d_model, d_inner * 2, use_bias=False, key=self.rng())
+        self.conv = Conv(
+            d_inner, d_inner, kernel_size=(self.conv_kernel,),
+            padding=((self.conv_kernel - 1, 0),),  # causal: pad left only
+            groups=d_inner, use_bias=True, key=self.rng(),
+        )
+        self.ssm = SelectiveSSM(d_inner, state_dim=self.state_dim, dt_rank=self.dt_rank, key=self.rng())
+        self.out_proj = Dense(d_inner, self.d_model, use_bias=False, key=self.rng())
+
+    def __call__(self, x):
+        # x: (batch, seq_len, d_model)
+        x_in, z = jnp.split(self.in_proj(x), 2, axis=-1)   # each (batch, seq_len, d_inner)
+        x_in = jax.nn.silu(self.conv(x_in))
+        y = self.ssm(x_in)
+        y = y * jax.nn.silu(z)
+        return self.out_proj(y)
+
+
+__all__ = ["SSM", "SelectiveSSM", "MambaBlock"]
