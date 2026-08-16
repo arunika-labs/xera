@@ -5,18 +5,29 @@
         partition.py      Partition (combinator over several optimizers --
                            doesn't fit core/ (not a single gradient algorithm)
                            or wrapper/ (doesn't wrap just one), stays top-level)
-        core/             one core optimizer per file
+        core/             one core optimizer per file (family variants share
+                           a file, e.g. Adam/AdamW both in core/adam.py)
             sgd.py            SGDMomentum
-            adam.py           AdamW (and future Adam variants)
+            adam.py           Adam, AdamW
             lion.py           Lion
             muon.py           MuonCore, Muon (core + packed sugar)
+            rmsprop.py        RMSprop
+            adagrad.py        Adagrad
+            adan.py           Adan
+            adafactor.py      Adafactor
+            shampoo.py        Shampoo
         wrapper/          one wrapper per file
             clip.py           Clip
             schedule.py       Schedule
             accumulate.py     Accumulate
+            weight_decay.py   WeightDecay
+            ema.py            EMA
+            freeze.py         Freeze
+            lookahead.py      Lookahead
+            cast.py           Cast
 
-Wrappers (Clip, Schedule, Accumulate) are factories: construct with config,
-then call on an optimizer to wrap it --
+Wrappers are factories: construct with config, then call on an optimizer
+to wrap it --
 
     opt = O.Clip(1.0)(O.Schedule(cosine_fn)(O.Muon(lr=0.02)))
 
@@ -31,19 +42,51 @@ here.
 
 from .base import Optimizer, apply_updates
 from .partition import Partition
-from .core import SGDMomentum, AdamW, Lion, MuonCore, Muon
-from .wrapper import Clip, Schedule, Accumulate
+from .core import (
+    SGDMomentum,
+    Adam,
+    AdamW,
+    Lion,
+    MuonCore,
+    Muon,
+    RMSprop,
+    Adagrad,
+    Adan,
+    Adafactor,
+    Shampoo,
+)
+from .wrapper import (
+    Clip,
+    Schedule,
+    Accumulate,
+    WeightDecay,
+    EMA,
+    Freeze,
+    Lookahead,
+    Cast,
+)
 
 __all__ = [
     "Optimizer",
     "apply_updates",
+    "Partition",
     "SGDMomentum",
+    "Adam",
     "AdamW",
     "Lion",
     "MuonCore",
     "Muon",
+    "RMSprop",
+    "Adagrad",
+    "Adan",
+    "Adafactor",
+    "Shampoo",
     "Clip",
     "Schedule",
     "Accumulate",
-    "Partition",
+    "WeightDecay",
+    "EMA",
+    "Freeze",
+    "Lookahead",
+    "Cast",
 ]
