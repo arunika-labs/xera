@@ -1,6 +1,7 @@
 
 
 from __future__ import annotations
+import jax
 import jax.numpy as jnp
 from ..core import Module, Buffer, param
 from .. import initializers
@@ -20,6 +21,29 @@ class LayerNorm(Module):
         var = jnp.var(x, axis=-1, keepdims=True)
         xn = (x - mean) / jnp.sqrt(var + self.eps)
         return xn * self.gamma + self.beta
+
+
+class RMSNorm(Module):
+    """RMSNorm (Zhang & Sennrich, 2019): https://arxiv.org/abs/1910.07467
+
+    Normalizes by root-mean-square rather than LayerNorm's mean+variance --
+    no mean-centering, no `beta` shift term, just a single learned scale.
+    Cheaper than LayerNorm (skips the mean reduction) and is the default
+    norm in most current LLM stacks (LLaMA, Mistral, etc.) -- worth
+    reaching for by default in new transformer stacks built with this
+    library rather than LayerNorm, unless there's a specific reason to
+    mean-center.
+    """
+    dim: int
+    eps: float = 1e-6
+
+    def setup(self):
+        self.gamma = param(self.rng(), initializers.ones(), (self.dim,))
+
+    def __call__(self, x):
+        ms = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
+        xn = x * jax.lax.rsqrt(ms + self.eps)
+        return xn * self.gamma
 
 
 class BatchNorm(Module):
@@ -59,4 +83,4 @@ def _replace_state(bn, new_mean, new_var):
     return new_bn
 
 
-__all__ = ["LayerNorm", "BatchNorm"]
+__all__ = ["LayerNorm", "RMSNorm", "BatchNorm"]
