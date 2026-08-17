@@ -13,6 +13,7 @@ from .state import State
 from .loop import Loop
 from .optimizer.base import apply_updates
 from .metrics import Metrics
+from .callback import Callback
 
 
 class Train(State):
@@ -33,6 +34,24 @@ class Train(State):
         steps: The number of training steps to perform.
         loop_type: The type of loop implementation ("scan" or "fori_loop").
         log_every: Logging frequency. 0 disables logging, N logs every N steps.
+            Emitted via `Metrics.log` (`jax.debug.callback` -- best-effort,
+            unordered; fine for a printed/dashboarded loss value) by
+            default, or via `Callback.log` (`io_callback(ordered=True)` --
+            guaranteed, in-order) when `durable_log=True`; use that when a
+            metric's registered function has a real side effect, e.g.
+            appending to a log file.
+        durable_log: If True, route `log_every` through `Callback.log`
+            instead of `Metrics.log`. Both dispatch through the same
+            `Metrics._registry`, so registration (`Metrics.register(...)`)
+            doesn't change -- only the delivery guarantee does.
+        checkpoint_every: Checkpoint frequency. 0 disables checkpointing,
+            N saves the model every N steps. Emitted via `Callback.save_model`
+            (`jax.experimental.io_callback(..., ordered=True)`), since a
+            checkpoint write is a real effect that must land on disk, and in
+            step order, unlike a debug-only metric print.
+        checkpoint_path_fn: A plain Python callable `int -> str` mapping a
+            concrete step number to a checkpoint file path. Required if
+            `checkpoint_every` is set. Defaults to `"ckpt_{step}.safetensors"`.
     
     Example:
         >>> class MyTrainer(Train):
@@ -50,6 +69,9 @@ class Train(State):
     steps: int = 100
     loop_type: str = "scan"
     log_every: int = 0   # 0 = no metric logging
+    durable_log: bool = False   # False -> Metrics.log, True -> Callback.log
+    checkpoint_every: int = 0   # 0 = no checkpointing
+    checkpoint_path_fn: object = None   # int -> str, defaults to ckpt_{step}.safetensors
 
     def setup(self):
         """
@@ -61,6 +83,8 @@ class Train(State):
         assert self.optimizer is not None, "Train requires an `optimizer=` parameter (an instance of xera.weave.Optimizer)."
         assert self.loop_type in ("scan", "fori_loop"), f"Train only supports loop_type='scan' or 'fori_loop', got: {self.loop_type}"
         self.loop = Loop(type=self.loop_type, steps=self.steps)
+        if self.checkpoint_every and self.checkpoint_path_fn is None:
+            self.checkpoint_path_fn = lambda step: f"ckpt_{step}.safetensors"
 
     def loss_fn(self, pred, target):
         """
@@ -129,9 +153,23 @@ class Train(State):
         model = apply_updates(model, updates)
 
         if self.log_every:
+            log_fn = Callback.log if self.durable_log else Metrics.log
             jax.lax.cond(
                 i % self.log_every == 0,
-                lambda: Metrics.log(i, loss=loss),
+                lambda: log_fn(i, loss=loss),
+                lambda: None,
+            )
+
+        if self.checkpoint_every:
+            # Unlike the Metrics.log above (jax.debug.callback -- fire and
+            # forget), checkpointing goes through Callback (io_callback with
+            # ordered=True): it's a real filesystem write that must actually
+            # happen, and in the same order steps ran, so an interrupted or
+            # reordered run never leaves a newer checkpoint clobbered by a
+            # stale one.
+            jax.lax.cond(
+                i % self.checkpoint_every == 0,
+                lambda: Callback.save_model(i, model, self.checkpoint_path_fn),
                 lambda: None,
             )
 

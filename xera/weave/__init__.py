@@ -5,6 +5,7 @@ from .loop import Loop
 from .train import Train
 from .loss import Loss
 from .metrics import Metrics
+from .callback import Callback
 from .optimizer import (
     Optimizer,
     apply_updates,
@@ -36,6 +37,7 @@ __all__ = [
     "Train",
     "Loss",
     "Metrics",
+    "Callback",
     "Optimizer",
     "apply_updates",
     "Partition",

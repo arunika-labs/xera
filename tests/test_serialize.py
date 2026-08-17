@@ -1,14 +1,12 @@
 """Tests for xera.serialize: save_model, load_model, save_state, load_state."""
 
-import pickle
-
 import jax
 import jax.numpy as jnp
 import pytest
 import xera.loom as loom
 import xera.serialize as serialize
 from xera.serialize.model import save_model, load_model, _key
-from xera.serialize.state import save_state, load_state, _MAGIC, _VERSION
+from xera.serialize.state import save_state, load_state
 from xera.weave.optimizer.core.adam import Adam
 
 
@@ -106,55 +104,60 @@ def test_save_and_load_state_roundtrip(tmp_path):
     grads = jax.tree_util.tree_map(lambda p: p * 0.5, params)
     _, state = opt.update(grads, state, params)  # advance state so it's non-trivial
 
-    path = str(tmp_path / "state.pkl")
+    path = str(tmp_path / "state.safetensors")
     save_state(state, path)
-    loaded = load_state(path)
+
+    template = opt.init(params)  # fresh state, same structure, zeroed values
+    loaded = load_state(template, path)
 
     assert int(loaded.step) == int(state.step)
     assert jnp.allclose(loaded.m["w"], state.m["w"])
     assert jnp.allclose(loaded.v["w"], state.v["w"])
 
 
-def test_save_state_writes_magic_bytes(tmp_path):
+def test_save_state_output_is_plain_safetensors(tmp_path):
+    # No pickle, no magic bytes -- just a regular safetensors file, loadable
+    # directly with the reference library.
+    from safetensors.numpy import load_file
     opt = Adam(lr=0.1)
     state = opt.init({"w": jnp.ones((2,))})
-    path = str(tmp_path / "state.pkl")
+    path = str(tmp_path / "state.safetensors")
     save_state(state, path)
 
-    with open(path, "rb") as f:
-        blob = pickle.load(f)
-    assert blob["magic"] == _MAGIC
-    assert blob["version"] == _VERSION
-
-
-def test_load_state_rejects_non_xera_file(tmp_path):
-    path = str(tmp_path / "not_xera.pkl")
-    with open(path, "wb") as f:
-        pickle.dump({"some": "random_dict"}, f)
-
-    with pytest.raises(ValueError, match="not a xera state file"):
-        load_state(path)
-
-
-def test_load_state_rejects_non_pickle_file(tmp_path):
-    path = str(tmp_path / "garbage.pkl")
-    with open(path, "wb") as f:
-        f.write(b"not a pickle file at all")
-
-    with pytest.raises(ValueError, match="not a xera state file"):
-        load_state(path)
+    tensors = load_file(path)
+    assert "step" in tensors
+    assert "m['w']" in tensors
+    assert "v['w']" in tensors
 
 
 def test_load_state_rejects_missing_file():
-    with pytest.raises(FileNotFoundError):
-        load_state("/nonexistent/path/state.pkl")
+    template = Adam(lr=0.1).init({"w": jnp.ones((2,))})
+    with pytest.raises(Exception):
+        load_state(template, "/nonexistent/path/state.safetensors")
+
+
+def test_load_state_does_not_mutate_template_in_place(tmp_path):
+    opt = Adam(lr=0.1)
+    params = {"w": jnp.ones((2, 2))}
+    state = opt.init(params)
+    grads = jax.tree_util.tree_map(lambda p: p * 0.5, params)
+    _, state = opt.update(grads, state, params)
+
+    path = str(tmp_path / "state.safetensors")
+    save_state(state, path)
+
+    template = opt.init(params)
+    template_m_before = template.m["w"].copy()
+    load_state(template, path)
+    assert jnp.allclose(template.m["w"], template_m_before)
 
 
 def test_save_state_roundtrip_preserves_nested_pytree_structure(tmp_path):
     state = {"a": jnp.ones((2, 2)), "b": {"c": jnp.zeros((3,))}}
-    path = str(tmp_path / "nested_state.pkl")
+    path = str(tmp_path / "nested_state.safetensors")
     save_state(state, path)
-    loaded = load_state(path)
+    template = {"a": jnp.zeros((2, 2)), "b": {"c": jnp.zeros((3,))}}
+    loaded = load_state(template, path)
     assert jnp.allclose(loaded["a"], state["a"])
     assert jnp.allclose(loaded["b"]["c"], state["b"]["c"])
 
@@ -170,9 +173,11 @@ def test_save_state_with_partition_optimizer_roundtrip(tmp_path):
     params = {"w": jnp.ones((2, 2)), "b": jnp.ones((2,))}
     state = opt.init(params)
 
-    path = str(tmp_path / "partition_state.pkl")
+    path = str(tmp_path / "partition_state.safetensors")
     save_state(state, path)
-    loaded = load_state(path)
+
+    template = opt.init(params)  # same rules + param structure -> same assignment
+    loaded = load_state(template, path)
 
     assert loaded.assignment == state.assignment
 

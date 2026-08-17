@@ -292,5 +292,119 @@ def test_train_log_every_does_not_crash(capsys):
     assert final_model.weight.shape == model.weight.shape
 
 
+def test_train_checkpoint_every_writes_files(tmp_path):
+    model = _make_linear_model()
+
+    class Trainer(Train):
+        def setup(self):
+            super().setup()
+            self._x = jnp.array([[1.0, 0.0], [0.0, 1.0]])
+            self._y = jnp.array([[1.0], [1.0]])
+
+        def loss_fn(self, pred, target):
+            return jnp.mean((pred - target) ** 2)
+
+        def get_batch(self, i):
+            return self._x, self._y
+
+    trainer = Trainer(
+        optimizer=SGDMomentum(lr=0.01),
+        steps=4,
+        checkpoint_every=2,
+        checkpoint_path_fn=lambda step: str(tmp_path / f"ckpt_{step}.safetensors"),
+    )
+    final_model = trainer(model)
+    jax.effects_barrier()
+
+    assert final_model.weight.shape == model.weight.shape
+    # checkpoint_every=2 over steps 0..3 -> writes at step 0 and step 2.
+    assert (tmp_path / "ckpt_0.safetensors").exists()
+    assert (tmp_path / "ckpt_2.safetensors").exists()
+    assert not (tmp_path / "ckpt_1.safetensors").exists()
+
+
+def test_train_checkpoint_every_default_path(tmp_path, monkeypatch):
+    model = _make_linear_model()
+    monkeypatch.chdir(tmp_path)
+
+    class Trainer(Train):
+        def setup(self):
+            super().setup()
+            self._x = jnp.array([[1.0, 0.0]])
+            self._y = jnp.array([[1.0]])
+
+        def loss_fn(self, pred, target):
+            return jnp.mean((pred - target) ** 2)
+
+        def get_batch(self, i):
+            return self._x, self._y
+
+    trainer = Trainer(optimizer=SGDMomentum(lr=0.01), steps=1, checkpoint_every=1)
+    trainer(model)
+    jax.effects_barrier()
+    assert (tmp_path / "ckpt_0.safetensors").exists()
+
+
+def test_train_checkpoint_every_zero_writes_nothing(tmp_path, monkeypatch):
+    model = _make_linear_model()
+    monkeypatch.chdir(tmp_path)
+
+    class Trainer(Train):
+        def setup(self):
+            super().setup()
+            self._x = jnp.array([[1.0, 0.0]])
+            self._y = jnp.array([[1.0]])
+
+        def loss_fn(self, pred, target):
+            return jnp.mean((pred - target) ** 2)
+
+        def get_batch(self, i):
+            return self._x, self._y
+
+    trainer = Trainer(optimizer=SGDMomentum(lr=0.01), steps=2)  # checkpoint_every=0
+    trainer(model)
+    jax.effects_barrier()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_train_durable_log_writes_via_callback(tmp_path):
+    from xera.weave.metrics import Metrics
+
+    model = _make_linear_model()
+    log_path = tmp_path / "train.log"
+
+    @Metrics.register("loss")
+    def _to_file(step, value):
+        with open(log_path, "a") as f:
+            f.write(f"{int(step)},{float(value)}\n")
+
+    class Trainer(Train):
+        def setup(self):
+            super().setup()
+            self._x = jnp.array([[1.0, 0.0], [0.0, 1.0]])
+            self._y = jnp.array([[1.0], [1.0]])
+
+        def loss_fn(self, pred, target):
+            return jnp.mean((pred - target) ** 2)
+
+        def get_batch(self, i):
+            return self._x, self._y
+
+    try:
+        trainer = Trainer(
+            optimizer=SGDMomentum(lr=0.01), steps=4, log_every=2, durable_log=True
+        )
+        trainer(model)
+        jax.effects_barrier()
+
+        lines = log_path.read_text().splitlines()
+        # log_every=2 over steps 0..3 -> fires at step 0 and step 2.
+        assert len(lines) == 2
+        assert lines[0].startswith("0,")
+        assert lines[1].startswith("2,")
+    finally:
+        Metrics.unregister("loss")
+
+
 def test_train_accessible_from_weave_namespace():
     assert weave.Train is Train
