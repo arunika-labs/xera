@@ -61,7 +61,7 @@ trained_model = trainer(model)
 ### `O` — optimizers
 
 ```python
-from xera import O
+import xera.weave.optimizer as O
 
 opt = O.Adam(lr=1e-3)
 opt_state = opt.init(model)
@@ -71,7 +71,7 @@ updates, opt_state = opt.update(grads, opt_state, model)
 ### `S` — serialize
 
 ```python
-from xera import S
+import xera.serialize as S
 
 S.save_model(model, "model.safetensors")
 model = S.load_model(template, "model.safetensors")
