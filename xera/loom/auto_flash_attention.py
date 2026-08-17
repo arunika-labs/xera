@@ -1,5 +1,5 @@
 """
-AutoFA: Automatic Flash Attention backend selection.
+Automatic Flash Attention backend selection.
 
 This module provides a single entry point, `auto_flash_attention`, that
 picks the fastest available flash-attention implementation for the current
