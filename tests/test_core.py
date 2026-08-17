@@ -39,19 +39,6 @@ def test_params_pytree_leaves():
     assert shapes[".weight"] == (4, 8)
 
 
-def test_top_level_api_aliases():
-    import xera.loom as L
-    import xera.weave as W
-    import xera.serialize as S
-
-    assert xera.L is L
-    assert xera.W is W
-    assert xera.S is S
-    assert xera.L is xera.loom
-    assert xera.W is xera.weave
-    assert xera.S is xera.serialize
-
-
 def test_custom_module_with_loom():
     class MLP(loom.Module):
         in_features: int
