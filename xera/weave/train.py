@@ -17,6 +17,14 @@ class Train(State):
 
     def setup(self):
         assert self.optimizer is not None, "Train wajib diberi `optimizer=` (instance xera.weave.Optimizer)."
+        assert self.loop_type == "scan", (
+            "Train hanya mendukung loop_type='scan'. Train.run() mengumpulkan "
+            "`losses` per step lewat output stack dari lax.scan; lax.fori_loop "
+            "tidak mengumpulkan output per-step sama sekali (cuma carry akhir), "
+            "jadi tidak kompatibel dengan kontrak Train.run(). Kalau butuh "
+            "fori_loop tanpa histori losses, pakai xera.weave.Loop langsung, "
+            "bukan lewat Train."
+        )
         self.loop = Loop(type=self.loop_type, steps=self.steps)
 
     def loss_fn(self, pred, target):

@@ -32,14 +32,6 @@ class State:
         
         pass
 
-    def replace(self, **updates):
-        
-        new_obj = object.__new__(type(self))
-        new_obj.__dict__.update(self.__dict__)
-        for name, val in updates.items():
-            object.__setattr__(new_obj, name, val)
-        return new_obj
-
     
     def _tree_flatten(self):
         dynamic_names, dynamic_vals = [], []

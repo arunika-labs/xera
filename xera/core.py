@@ -87,38 +87,6 @@ class Module:
     def __call__(self, *args, **kwargs):
         raise NotImplementedError
 
-    
-    def params_dict(self):
-        
-        out = {}
-        for name, val in self.__dict__.items():
-            if name.startswith("_"):
-                continue
-            if isinstance(val, Module):
-                out[name] = val.params_dict()
-            elif isinstance(val, jnp.ndarray):
-                out[name] = val
-            elif isinstance(val, Buffer):
-                continue  
-            elif isinstance(val, (list, tuple)) and val and isinstance(val[0], Module):
-                out[name] = [v.params_dict() for v in val]
-        return out
-
-    def state_dict(self):
-        
-        out = {}
-        for name, val in self.__dict__.items():
-            if name.startswith("_"):
-                continue
-            if isinstance(val, Module):
-                sub = val.state_dict()
-                if sub:
-                    out[name] = sub
-            elif isinstance(val, Buffer):
-                out[name] = val.value
-        return out
-
-    
     def _tree_flatten(self):
         dynamic_names, dynamic_vals = [], []
         static_names, static_vals = [], []

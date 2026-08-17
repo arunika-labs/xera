@@ -33,11 +33,17 @@ def test_jit_and_grad():
     assert grads.attn.q_proj.weight.shape == (32, 32)
 
 
-def test_params_dict():
+def test_params_pytree_leaves():
+    # params_dict()/state_dict() were removed (dead code, duplicated what
+    # native pytree flattening already does) -- this is the replacement:
+    # inspect params via jax.tree_util directly, same route `serialize`
+    # and `grad` already use.
     dense = loom.Dense(4, 8, key=jax.random.PRNGKey(0))
-    pd = dense.params_dict()
-    assert set(pd.keys()) == {"weight", "bias"}
-    assert pd["weight"].shape == (4, 8)
+    leaves_with_path, _ = jax.tree_util.tree_flatten_with_path(dense)
+    names = {jax.tree_util.keystr(p) for p, _ in leaves_with_path}
+    assert names == {".weight", ".bias"}
+    shapes = {jax.tree_util.keystr(p): leaf.shape for p, leaf in leaves_with_path}
+    assert shapes[".weight"] == (4, 8)
 
 
 def test_batchnorm_state_separate_from_params():
@@ -315,6 +321,32 @@ def test_train_class_has_no_optax_dependency():
     import xera.weave.train as train_mod
     src = open(train_mod.__file__).read()
     assert "optax" not in src
+
+
+def test_train_rejects_fori_loop():
+    class MyTrain(weave.Train):
+        def loss_fn(self, pred, target):
+            return weave.Loss.L2(pred, target)
+
+        def get_batch(self, i):
+            return jnp.ones((2, 4)), jnp.zeros((2, 4))
+
+    with pytest.raises(AssertionError, match="loop_type='scan'"):
+        MyTrain(optimizer=weave.Adam(lr=1e-2), steps=5, loop_type="fori_loop")
+
+
+def test_loop_scan_collects_ys():
+    loop = weave.Loop(type="scan", steps=5)
+    final, ys = loop.run(lambda carry, i: (carry + i, carry), 0)
+    assert final == 0 + 1 + 2 + 3 + 4
+    assert list(ys) == [0, 0, 1, 3, 6]  # output is carry *before* each step's update
+
+
+def test_loop_fori_loop_correct_arg_order_and_no_ys():
+    loop = weave.Loop(type="fori_loop", steps=5)
+    final, ys = loop.run(lambda carry, i: carry + i, 0)
+    assert final == 0 + 1 + 2 + 3 + 4  # same sum as scan -> arg order is right
+    assert ys is None  # fori_loop collects no per-step output, unlike scan
 
 
 def test_train_end_to_end():
