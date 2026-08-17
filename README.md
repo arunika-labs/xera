@@ -29,7 +29,7 @@ import xera
 
 L = xera.loom       # layers / modules
 W = xera.weave       # training loop, loss, optimizers, metrics, callbacks
-O = xera.weave.optimizer  # also reachable as xera.O
+O = xera.weave.optimizer  # optimizer / wrapper
 S = xera.serialize    # save / load (safetensors)
 ```
 
