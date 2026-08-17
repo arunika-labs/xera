@@ -6,6 +6,7 @@ from .train import Train
 from .loss import Loss
 from .metrics import Metrics
 from .callback import Callback
+from . import optimizer
 from .optimizer import (
     Optimizer,
     apply_updates,
