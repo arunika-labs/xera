@@ -1,5 +1,3 @@
-
-
 """
 Loop module for JAX-based training loops.
 
@@ -73,42 +71,58 @@ class Loop(State):
             ...     return carry + x, carry * x
             >>> final_carry, outputs = loop.run(step, init_carry=0, xs=jnp.array([1,2,3,4,5]))
         """
+        # Default xs the same way for both loop types, so switching
+        # between "scan" and "fori_loop" is a drop-in change.
+        if xs is None:
+            xs = jnp.arange(self.steps)
+
         if self.type == "fori_loop":
             # fori_loop can collect outputs by pre-allocating an array
             # and filling it manually in the loop. The carry includes both
             # the original carry state and the output array.
-            
-            # Run the body function once to determine output shape/dtype
-            _, sample_output = body_fn(init_carry, 0)
-            
-            # Pre-allocate output array
-            outputs = jnp.zeros((self.steps,) + sample_output.shape, dtype=sample_output.dtype)
-            
+
+            # Run the body function once to determine output shape/dtype.
+            # Use the first element of xs (matching what fori_body will pass
+            # at i=0) rather than the raw index, and coerce to an array so
+            # scalar outputs don't crash on `.shape`.
+            x0 = jax.tree_util.tree_map(lambda a: a[0], xs)
+            _, sample_output = body_fn(init_carry, x0)
+            sample_output = jax.tree_util.tree_map(jnp.asarray, sample_output)
+
+            # Pre-allocate output array(s), matching the pytree structure of
+            # a single step's output.
+            outputs = jax.tree_util.tree_map(
+                lambda s: jnp.zeros((self.steps,) + s.shape, dtype=s.dtype),
+                sample_output,
+            )
+
             def fori_body(i, carry):
                 """
                 Body function for fori_loop that maintains both carry and outputs.
-                
+
                 Args:
                     i: Current iteration index
                     carry: Tuple of (original_carry, outputs_array)
-                
+
                 Returns:
                     Updated tuple of (new_carry, updated_outputs_array)
                 """
                 original_carry, outputs_array = carry
-                new_carry, output = body_fn(original_carry, i)
-                # Update the output array at position i
-                new_outputs = outputs_array.at[i].set(output)
+                # Pull the i-th element out of xs, same as scan would.
+                x_i = jax.tree_util.tree_map(lambda a: a[i], xs)
+                new_carry, output = body_fn(original_carry, x_i)
+                # Update the output array(s) at position i
+                new_outputs = jax.tree_util.tree_map(
+                    lambda arr, out: arr.at[i].set(out), outputs_array, output
+                )
                 return (new_carry, new_outputs)
-            
+
             final_carry, final_outputs = jax.lax.fori_loop(
                 0, self.steps, fori_body, (init_carry, outputs)
             )
             return final_carry, final_outputs
 
         # Use jax.lax.scan for efficient compiled looping
-        if xs is None:
-            xs = jnp.arange(self.steps)
         final_carry, ys = jax.lax.scan(body_fn, init_carry, xs, length=self.steps)
         return final_carry, ys
 
