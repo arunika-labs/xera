@@ -1,9 +1,7 @@
-
-
 from . import initializers
 from . import loom
 from . import weave
-from . import weave.optimizer
+from .weave import optimizer
 from . import serialize
 
 L = loom
