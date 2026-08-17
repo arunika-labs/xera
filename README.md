@@ -5,7 +5,7 @@ A neural network library in JAX, designed for functional programming needs and e
 ## Install
 
 ```bash
-pip install xera
+pip install git+https://github.com/arunika-labs/xera.git
 ```
 
 ## Quickstart
