@@ -1,5 +1,3 @@
-
-
 """
 Normalization layers for stabilizing and accelerating neural network training.
 
@@ -109,7 +107,7 @@ class BatchNorm(Module):
     
     Example:
         >>> bn = BatchNorm(dim=64)
-        >>> output, new_bn = bn(input_tensor, training=True)
+        >>> output, new_bn = bn(input_tensor, deterministic=False)
     """
     
     dim: int
@@ -123,19 +121,21 @@ class BatchNorm(Module):
         self.running_mean = Buffer(jnp.zeros(self.dim))
         self.running_var = Buffer(jnp.ones(self.dim))
 
-    def __call__(self, x, *, training=True):
+    def __call__(self, x, *, deterministic=True):
         """
         Apply batch normalization to the input.
         
         Args:
             x: Input tensor of shape (batch, ..., dim).
-            training: If True, use batch statistics and update running stats.
-                If False, use running statistics.
+            deterministic: If False, use batch statistics and update running
+                stats (training mode). If True (default), use running
+                statistics (inference/eval mode).
         
         Returns:
             A tuple (output, new_layer) where new_layer contains updated
-            running statistics if training=True.
+            running statistics if deterministic=False.
         """
+        training = not deterministic
         if training:
             mean = jnp.mean(x, axis=0)
             var = jnp.var(x, axis=0)
@@ -315,7 +315,7 @@ class GroupNormWithRunningStats(Module):
     
     Example:
         >>> gn = GroupNormWithRunningStats(num_groups=8, dim=64)
-        >>> output, new_gn = gn(input_tensor, training=True)
+        >>> output, new_gn = gn(input_tensor, deterministic=False)
     """
     
     num_groups: int
@@ -330,22 +330,24 @@ class GroupNormWithRunningStats(Module):
         self.running_mean = Buffer(jnp.zeros(self.dim))
         self.running_var = Buffer(jnp.ones(self.dim))
 
-    def __call__(self, x, *, training=True):
+    def __call__(self, x, *, deterministic=True):
         """
         Apply group normalization with running statistics to the input.
         
         Args:
             x: Input tensor of shape (batch, *spatial, channels).
-            training: If True, use group statistics and update running stats.
-                If False, use running statistics.
+            deterministic: If False, use group statistics and update running
+                stats (training mode). If True (default), use running
+                statistics (inference/eval mode).
         
         Returns:
             A tuple (output, new_layer) where new_layer contains updated
-            running statistics if training=True.
+            running statistics if deterministic=False.
         """
         batch, *spatial, channels = x.shape
         x_reshaped = x.reshape(batch, -1, self.num_groups, channels // self.num_groups)
         
+        training = not deterministic
         if training:
             mean = jnp.mean(x_reshaped, axis=1, keepdims=True)
             var = jnp.var(x_reshaped, axis=1, keepdims=True)
