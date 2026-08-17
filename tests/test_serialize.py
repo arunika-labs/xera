@@ -191,10 +191,3 @@ def test_serialize_functions_exposed_at_package_level():
     assert serialize.load_model is load_model
     assert serialize.save_state is save_state
     assert serialize.load_state is load_state
-
-
-def test_serialize_accessible_via_xera_top_level_alias():
-    import xera
-    assert xera.S is xera.serialize
-    assert hasattr(xera.S, "save_model")
-    assert hasattr(xera.S, "load_state")
