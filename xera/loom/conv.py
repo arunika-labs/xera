@@ -1,5 +1,13 @@
 
 
+"""
+Convolutional layers for spatial feature extraction in neural networks.
+
+This module provides standard convolution and transposed convolution layers
+with support for various configurations including strided convolutions,
+dilated convolutions, and grouped convolutions.
+"""
+
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
@@ -8,13 +16,17 @@ from .. import initializers
 
 
 def _dimension_numbers(ndim: int) -> jax.lax.ConvDimensionNumbers:
-    """Rank-agnostic, channel-last dimension numbers for
-    `jax.lax.conv_general_dilated`, following the same construction Flax
-    uses for its generic-rank Conv: for an `ndim`-dimensional array
-    `(batch, *spatial, channels)`, batch is dim 0, channels is the last
-    dim, and everything in between is spatial -- for both the input/output
-    (`lhs`/`out`, layout `N...C`) and the kernel (`rhs`, layout
-    `*spatial, in, out`, i.e. "HWIO" in the 2D case).
+    """
+    Compute dimension numbers for JAX convolution operations.
+    
+    This sets up the dimension ordering for convolution operations to match
+    the framework's convention: (batch, *spatial, channels).
+    
+    Args:
+        ndim: The total number of dimensions in the input tensor.
+    
+    Returns:
+        A ConvDimensionNumbers object specifying the dimension layout.
     """
     lhs_spec = (0, ndim - 1) + tuple(range(1, ndim - 1))
     rhs_spec = (ndim - 1, ndim - 2) + tuple(range(0, ndim - 2))
@@ -23,35 +35,40 @@ def _dimension_numbers(ndim: int) -> jax.lax.ConvDimensionNumbers:
 
 
 def _as_tuple(v, n):
+    """
+    Convert a value to a tuple of length n if it isn't already.
+    
+    Args:
+        v: Value to convert (single value or tuple).
+        n: Length of the resulting tuple.
+    
+    Returns:
+        A tuple of length n containing the value v repeated n times,
+        or v if it's already a tuple.
+    """
     return v if isinstance(v, tuple) else (v,) * n
 
 
 class Conv(Module):
-    """N-dimensional convolution, N inferred from `len(kernel_size)` --
-    `kernel_size=(3,)` is a 1D conv, `(3, 3)` is 2D, `(3, 3, 3)` is 3D,
-    etc. One class instead of Conv1d/Conv2d/Conv3d, since the rank is just
-    a shape-dispatch detail of the same underlying operation
-    (`jax.lax.conv_general_dilated` is rank-agnostic natively) -- same
-    reasoning as why MuonCore is one class handling ndim 2/3/4, not three
-    separate optimizer classes.
-
-    Input/output layout is channel-last: `(batch, *spatial, channels)`,
-    matching `Dense`'s convention that the last axis is the feature
-    dimension. Kernel (weight) shape is `(*kernel_size, in_channels //
-    groups, out_channels)`.
-
-    `padding` accepts `"SAME"`/`"VALID"` (passed straight through to
-    `lax.conv_general_dilated`) or an explicit tuple of `(lo, hi)` pairs,
-    one per spatial dimension.
-
-    `groups` enables depthwise/grouped convolution (`in_channels % groups
-    == 0`, `out_channels % groups == 0`) via `feature_group_count` --
-    e.g. a depthwise conv is `groups=in_channels`.
-
-    Transposed convolution isn't included here -- a `ConvTranspose` using
-    `jax.lax.conv_transpose` would follow the same rank-agnostic pattern
-    but needs a distinct code path, so it's left for a future addition
-    rather than folded into this class.
+    """
+    Standard convolution layer.
+    
+    Applies a convolution operation over spatial dimensions of the input.
+    Supports strided convolutions, dilated convolutions, and grouped convolutions.
+    
+    Attributes:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        kernel_size: Tuple of kernel sizes for each spatial dimension.
+        stride: Stride for each spatial dimension (default: 1).
+        padding: Padding mode: "SAME", "VALID", or a tuple of padding values.
+        dilation: Dilation factor for each spatial dimension (default: 1).
+        groups: Number of groups for grouped convolution (default: 1).
+        use_bias: Whether to add a bias term (default: True).
+    
+    Example:
+        >>> conv = Conv(in_channels=3, out_channels=64, kernel_size=(3, 3))
+        >>> output = conv(input_tensor)
     """
 
     in_channels: int
@@ -64,6 +81,7 @@ class Conv(Module):
     use_bias: bool = True
 
     def setup(self):
+        """Initialize convolution weights and optional bias."""
         assert self.in_channels % self.groups == 0, (
             f"in_channels ({self.in_channels}) must be divisible by groups ({self.groups})"
         )
@@ -79,7 +97,15 @@ class Conv(Module):
         )
 
     def __call__(self, x):
-        # x: (batch, *spatial, in_channels)
+        """
+        Apply convolution to the input tensor.
+        
+        Args:
+            x: Input tensor of shape (batch, *spatial, in_channels).
+        
+        Returns:
+            Output tensor of shape (batch, *spatial', out_channels).
+        """
         n_spatial = len(self.kernel_size)
         stride = _as_tuple(self.stride, n_spatial)
         dilation = _as_tuple(self.dilation, n_spatial)
@@ -99,18 +125,25 @@ class Conv(Module):
 
 
 class ConvTranspose(Module):
-    """N-dimensional transposed convolution ("deconvolution"), same
-    rank-agnostic dispatch as `Conv` (rank inferred from
-    `len(kernel_size)`). The upsampling counterpart to `Conv` -- typical
-    use is a decoder/generator stack that needs to grow spatial
-    resolution back up, mirroring an encoder built from `Conv`.
-
-    Same channel-last layout and kernel shape convention as `Conv`:
-    input/output `(batch, *spatial, channels)`, kernel `(*kernel_size,
-    in_channels // groups, out_channels)`. `stride` here controls the
-    upsampling factor (stride 2 roughly doubles spatial size), unlike
-    `Conv` where stride shrinks it -- this is `lax.conv_transpose`'s
-    normal semantics, not a xera-specific inversion.
+    """
+    Transposed convolution (fractionally-strided convolution) layer.
+    
+    Also known as deconvolution, this layer performs the inverse operation
+    of a standard convolution, commonly used for upsampling in generative
+    models and segmentation networks.
+    
+    Attributes:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        kernel_size: Tuple of kernel sizes for each spatial dimension.
+        stride: Stride for each spatial dimension (default: 1).
+        padding: Padding mode: "SAME", "VALID", or a tuple of padding values.
+        dilation: Dilation factor for each spatial dimension (default: 1).
+        use_bias: Whether to add a bias term (default: True).
+    
+    Example:
+        >>> deconv = ConvTranspose(in_channels=64, out_channels=3, kernel_size=(3, 3))
+        >>> output = deconv(input_tensor)
     """
 
     in_channels: int
@@ -122,6 +155,7 @@ class ConvTranspose(Module):
     use_bias: bool = True
 
     def setup(self):
+        """Initialize transposed convolution weights and optional bias."""
         weight_shape = tuple(self.kernel_size) + (self.in_channels, self.out_channels)
         self.weight = param(self.rng(), initializers.kaiming_normal(), weight_shape)
         self.bias = (
@@ -130,7 +164,15 @@ class ConvTranspose(Module):
         )
 
     def __call__(self, x):
-        # x: (batch, *spatial, in_channels)
+        """
+        Apply transposed convolution to the input tensor.
+        
+        Args:
+            x: Input tensor of shape (batch, *spatial, in_channels).
+        
+        Returns:
+            Output tensor of shape (batch, *spatial', out_channels).
+        """
         n_spatial = len(self.kernel_size)
         stride = _as_tuple(self.stride, n_spatial)
         dilation = _as_tuple(self.dilation, n_spatial)

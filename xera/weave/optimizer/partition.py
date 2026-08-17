@@ -1,10 +1,4 @@
-"""Partition: route pytree leaves to different optimizers by predicate.
 
-A combinator, not a single-optimizer wrapper -- it takes an ordered list
-of (predicate, optimizer) rules and constructs a full Optimizer over the
-whole params tree, similar in spirit to optax.multi_transform but keyed
-by a `(path, leaf) -> bool` predicate instead of a label pytree.
-"""
 
 from __future__ import annotations
 from typing import Any, Callable, Sequence, Tuple
@@ -33,25 +27,7 @@ jax.tree_util.register_pytree_node(
 
 
 class Partition(Optimizer):
-    """Combinator: partitions params/grads by predicate, one optimizer per
-    group.
 
-    Usage:
-        opt = O.Partition([
-            (lambda path, leaf: leaf.ndim == 2, O.Muon(lr=0.02)),
-            (lambda path, leaf: True, O.AdamW(lr=1e-4)),   # catch-all
-        ])
-
-    Rules are evaluated in order; the first predicate that returns True for
-    a leaf wins. Not restricted to two groups or to Muon+fallback -- any
-    number of rules, any optimizers, e.g. AdamW for embeddings, Lion for
-    attention, SGD for biases.
-
-    First-match-wins; the last rule is conventionally a catch-all
-    (`lambda path, leaf: True`). If no rule matches a leaf, this is treated
-    as a configuration error and raised eagerly in `init()`, not left to
-    fail silently (or fail confusingly under jit) inside `update()`.
-    """
 
     def __init__(self, rules: Sequence[Tuple[Predicate, Optimizer]]):
         assert len(rules) > 0, "Partition needs at least one (predicate, optimizer) rule"

@@ -1,4 +1,4 @@
-"""Lion (Evolved Sign Momentum)."""
+
 
 from __future__ import annotations
 from typing import NamedTuple, Any

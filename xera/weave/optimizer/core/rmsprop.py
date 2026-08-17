@@ -1,4 +1,4 @@
-"""RMSprop, with optional momentum and the centered variant."""
+
 
 from __future__ import annotations
 from typing import NamedTuple, Any
@@ -14,20 +14,7 @@ class RMSpropState(NamedTuple):
 
 
 class RMSprop(Optimizer):
-    """Classic RMSprop: divide the gradient by a running RMS of its recent
-    magnitude.
 
-    Args:
-        decay: decay rate for the squared-grad running average (often
-            called `alpha` or `rho` elsewhere).
-        momentum: if > 0, applies plain momentum to the RMS-scaled
-            gradient (à la PyTorch's `RMSprop(momentum=...)`), not
-            Nesterov -- for Nesterov-style momentum, compose with a
-            different core optimizer instead.
-        centered: if True, also tracks a running mean of the gradient and
-            uses `v - mean_g**2` as the normalizer (reduces bias from
-            grads with a large mean vs. variance) instead of raw `v`.
-    """
 
     def __init__(self, lr, decay=0.9, eps=1e-8, momentum=0.0, centered=False):
         self.lr = lr

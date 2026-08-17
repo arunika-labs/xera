@@ -1,4 +1,4 @@
-"""SGD with (optionally Nesterov) momentum."""
+
 
 from __future__ import annotations
 from typing import NamedTuple, Any

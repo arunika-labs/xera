@@ -1,35 +1,4 @@
-"""Shampoo (Gupta et al. 2018): https://arxiv.org/abs/1802.09568
 
-A practical, simplified full-matrix Shampoo restricted to 2D leaves. For a
-weight matrix W of shape (m, n), Shampoo maintains two small preconditioners
-instead of one big one: L (m x m, "row" statistics) and R (n x n, "column"
-statistics), and preconditions the gradient as `L^(-1/4) @ g @ R^(-1/4)`
-(the standard practical approximation to the theoretically-motivated
-L^(-1/2) (x) R^(-1/2) Kronecker preconditioner). This is the same shape of
-idea as MuonCore's Newton-Schulz orthogonalization -- both replace a plain
-per-element learning rate with a whole-matrix-aware direction -- but
-Shampoo does it via explicit preconditioner matrices rather than an
-orthogonalization iteration.
-
-Leaves with ndim != 2 aren't supported here -- route them elsewhere with
-`Partition`, same pattern as MuonCore/Muon:
-
-    opt = O.Partition([
-        (lambda path, leaf: leaf.ndim == 2, O.Shampoo(lr=0.01)),
-        (lambda path, leaf: True, O.AdamW(lr=1e-4)),
-    ])
-
-The inverse 4th-root is computed via eigendecomposition (`jnp.linalg.eigh`),
-which is the expensive part of Shampoo -- `precondition_every` controls how
-often it's recomputed (every step by default; raise it to amortize the
-cost over several steps, reusing the last computed preconditioner in
-between, at the cost of slightly staler curvature estimates).
-
-SOAP (Vyas et al. 2024) is a closely related variant -- Shampoo's
-preconditioners applied in a rotated (eigenbasis) space -- and is a
-plausible future addition here rather than a separate implementation, since
-the two share almost all of this machinery.
-"""
 
 from __future__ import annotations
 from typing import NamedTuple, Any
@@ -39,7 +8,7 @@ from ..base import Optimizer, _tree_map
 
 
 def _matrix_inv_pth_root(mat, p, eps=1e-6):
-    """Symmetric PD matrix M -> M^(-1/p) via eigendecomposition."""
+
     dim = mat.shape[0]
     reg = mat + eps * jnp.eye(dim, dtype=mat.dtype)
     eigvals, eigvecs = jnp.linalg.eigh(reg)
@@ -61,15 +30,7 @@ class Shampoo(Optimizer):
 
     def __init__(self, lr, momentum=0.9, beta=1.0, eps=1e-6,
                  precondition_every=1, weight_decay=0.0):
-        """
-        Args:
-            beta: exponential decay for the L/R accumulators. `1.0` (the
-                default) matches the original paper's "accumulate forever"
-                behavior; set < 1.0 for an exponential-moving-average
-                variant that adapts faster to changing curvature.
-            precondition_every: recompute the expensive inverse-root every
-                N calls; reuses the cached preconditioner in between.
-        """
+
         self.lr = lr
         self.momentum = momentum
         self.beta = beta

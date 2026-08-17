@@ -1,10 +1,4 @@
-"""Lookahead (Zhang et al. 2019): https://arxiv.org/abs/1907.08610
 
-Runs the wrapped ("fast") optimizer normally for `k` steps, then pulls a
-separately-tracked "slow" copy of the params partway toward wherever the
-fast weights ended up, and resets the fast weights to that synced point.
-Generic -- wraps any Optimizer.
-"""
 
 from __future__ import annotations
 from typing import NamedTuple, Any
@@ -14,21 +8,7 @@ from ..base import Optimizer, _tree_map
 
 
 class Lookahead:
-    """Factory: k fast steps via the wrapped optimizer, then interpolate
-    slow weights toward the fast weights and resync.
 
-    Usage:
-        opt = O.Lookahead(k=5, alpha=0.5)(O.AdamW(lr=1e-3))
-
-    Requires `params` to be passed to `update()` (it needs the actual
-    weight values to compute the fast/slow interpolation, not just
-    gradients) -- raises if `params` is None.
-
-    Step source: uses the external `step` if threaded via
-    `update(..., step=...)` to decide when to sync
-    (`(step + 1) % k == 0`), otherwise an internal counter -- same
-    convention as Accumulate.
-    """
 
     def __init__(self, k: int = 5, alpha: float = 0.5):
         assert k >= 1, "Lookahead(k=...) needs k >= 1"

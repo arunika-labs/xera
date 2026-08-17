@@ -1,9 +1,4 @@
-"""Adagrad -- accumulates squared gradients forever, so the effective
-learning rate monotonically shrinks. Included for reference/completeness;
-for most deep learning workloads a decayed variant (RMSprop, Adam) works
-better since Adagrad's step size can shrink to near-zero well before
-training converges.
-"""
+
 
 from __future__ import annotations
 from typing import NamedTuple, Any

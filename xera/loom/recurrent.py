@@ -1,5 +1,13 @@
 
 
+"""
+State Space Models (SSM) and recurrent layers for sequence modeling.
+
+This module provides implementations of State Space Models including S4D,
+Selective State Space Models (SelectiveSSM), and the Mamba architecture.
+These are efficient alternatives to transformers for long sequence modeling.
+"""
+
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
@@ -10,13 +18,18 @@ from .conv import Conv
 
 
 def _s4d_log_A_init(state_dim):
-    """Deterministic S4D-Lin-style init: A_n = -(n+1) for n = 0..state_dim-1,
-    stored in log space (since A itself is recovered as `-exp(log_A)`, always
-    negative -- this parameterization keeps the recurrence stable under
-    gradient updates, since no value of log_A can push A to be non-negative).
-    Same spectrum for every channel; channels differentiate via B/C instead.
-    Deterministic (ignores the RNG key) -- this is a fixed spectral
-    initialization from the S4D paper, not a random one.
+    """
+    S4D (Structured State Space for Sequence Modeling Diagonal) initialization for A matrix.
+    
+    Initializes the log of the A matrix using a diagonal structure with
+    values based on the state dimension indices. This follows the S4D
+    initialization scheme for stable training.
+    
+    Args:
+        state_dim: The state dimension for the SSM.
+    
+    Returns:
+        An initialization function that creates log A values.
     """
     def init(key, shape, dtype=jnp.float32):
         channels, sd = shape
@@ -26,9 +39,18 @@ def _s4d_log_A_init(state_dim):
 
 
 def _log_uniform_init(low, high):
-    """Log-uniform between `low` and `high` -- standard for SSM timestep
-    (dt) initialization, so a layer's channels span multiple timescales
-    from the start rather than all starting at the same dt.
+    """
+    Log-uniform initialization for parameters that should span multiple scales.
+    
+    Initializes parameters uniformly in log space, which is useful for
+    parameters like time steps (dt) that should span several orders of magnitude.
+    
+    Args:
+        low: Lower bound for the parameter (in linear space).
+        high: Upper bound for the parameter (in linear space).
+    
+    Returns:
+        An initialization function that samples from log-uniform distribution.
     """
     def init(key, shape, dtype=jnp.float32):
         u = jax.random.uniform(key, shape, dtype)
@@ -37,25 +59,22 @@ def _log_uniform_init(low, high):
 
 
 class SSM(Module):
-    """Diagonal state-space layer, depthwise over channels (S4D-style,
-    real-valued): each channel gets its own independent linear recurrence
-    of size `state_dim`, with fixed (non-input-dependent) dynamics,
-    discretized via zero-order hold.
-
-    Simplified to real-valued A/B/C rather than the complex-valued
-    parameterization in the full S4D paper -- this trades some
-    expressiveness (a real diagonal system can't represent oscillatory
-    modes as compactly as a complex one can) for a much simpler
-    implementation with no complex-number pytree handling. Non-selective:
-    contrast `SelectiveSSM` below, whose B/C/dt are computed from the
-    input at every timestep instead of fixed per layer.
-
-    Input/output: `(batch, seq_len, channels)` -> `(batch, seq_len, channels)`.
-
-    Runs via `jax.lax.scan`, so it's O(seq_len) sequential steps -- a
-    parallel/associative-scan implementation (as in the S4/S5 papers, for
-    logarithmic rather than linear depth) is a possible future
-    optimization, not done here.
+    """
+    Structured State Space Model (S4D variant).
+    
+    Implements a diagonal structured state space model with discretization
+    using zero-order hold. This provides efficient sequence modeling with
+    linear complexity in sequence length.
+    
+    Attributes:
+        channels: Number of input/output channels.
+        state_dim: Dimension of the state space (default: 16).
+        dt_min: Minimum time step for discretization (default: 0.001).
+        dt_max: Maximum time step for discretization (default: 0.1).
+    
+    Example:
+        >>> ssm = SSM(channels=64, state_dim=16)
+        >>> output = ssm(input_sequence)  # shape: (batch, seq_len, channels)
     """
 
     channels: int
@@ -64,6 +83,7 @@ class SSM(Module):
     dt_max: float = 0.1
 
     def setup(self):
+        """Initialize SSM parameters (A, B, C, D, dt)."""
         k_B, k_C, k_dt = self.rng(3)
         self.log_A = param(
             self.rng(), _s4d_log_A_init(self.state_dim), (self.channels, self.state_dim)
@@ -76,7 +96,15 @@ class SSM(Module):
         )
 
     def __call__(self, x):
-        # x: (batch, seq_len, channels)
+        """
+        Apply the state space model to the input sequence.
+        
+        Args:
+            x: Input tensor of shape (batch, seq_len, channels).
+        
+        Returns:
+            Output tensor of shape (batch, seq_len, channels).
+        """
         A = -jnp.exp(self.log_A)               # (channels, state_dim), always < 0
         dt = jnp.exp(self.log_dt)               # (channels,)
         dA = jnp.exp(A * dt[:, None])           # (channels, state_dim)
@@ -87,6 +115,7 @@ class SSM(Module):
         xt = jnp.transpose(x, (1, 0, 2))        # (seq_len, batch, channels)
 
         def step(h, u_t):
+            """Single step of the SSM recurrence."""
             h_new = dA[None] * h + dB[None] * u_t[:, :, None]
             y_t = jnp.sum(self.C[None] * h_new, axis=-1) + self.D[None] * u_t
             return h_new, y_t
@@ -96,31 +125,21 @@ class SSM(Module):
 
 
 class SelectiveSSM(Module):
-    """Selective SSM -- the S6 recurrence from Mamba (Gu & Dao, 2023):
-    https://arxiv.org/abs/2312.00752
-
-    Same diagonal per-channel linear state as `SSM` above, but B, C, and
-    the timestep dt are no longer fixed per layer -- they're computed from
-    the input at each timestep via learned projections, so the
-    recurrence's effective dynamics can depend on content (the "selection
-    mechanism" the name refers to, and the reason Mamba outperforms plain
-    linear SSMs on tasks needing content-based reasoning).
-
-    This implements the core selective-scan recurrence only, not the full
-    Mamba block -- the reference architecture also wraps this in an input
-    projection, a short causal depthwise `Conv` (see `conv.py`), and a
-    SiLU gating branch. Composing those around this layer into a
-    `MambaBlock`-style combinator is a natural next step, not included
-    here.
-
-    Discretization matches the reference Mamba implementation's choice:
-    exact zero-order-hold for A (`dA = exp(A * dt)`, same as `SSM` above),
-    but a simplified Euler step for B (`dB = dt * B`) rather than the exact
-    ZOH form `(dA - 1) / A * B` -- this is a documented simplification in
-    the original paper/code (the two coincide as dt -> 0), not an
-    inconsistency with `SSM`'s discretization above.
-
-    Input/output: `(batch, seq_len, d_inner)` -> `(batch, seq_len, d_inner)`.
+    """
+    Selective State Space Model (SelectiveSSM).
+    
+    A variant of SSM where the discretization parameters (dt, B, C) are
+    input-dependent, allowing the model to selectively remember or ignore
+    information based on the input. This is the core building block of Mamba.
+    
+    Attributes:
+        d_inner: Inner dimension of the SSM.
+        state_dim: Dimension of the state space (default: 16).
+        dt_rank: Rank for the low-rank dt projection (default: d_inner // 16).
+    
+    Example:
+        >>> ssm = SelectiveSSM(d_inner=64, state_dim=16)
+        >>> output = ssm(input_sequence)
     """
 
     d_inner: int
@@ -128,6 +147,7 @@ class SelectiveSSM(Module):
     dt_rank: int = None
 
     def setup(self):
+        """Initialize selective SSM parameters with input-dependent projections."""
         dt_rank = self.dt_rank if self.dt_rank is not None else max(1, self.d_inner // 16)
         self._dt_rank = dt_rank
 
@@ -147,7 +167,15 @@ class SelectiveSSM(Module):
         self.dt_proj = Dense(dt_rank, self.d_inner, key=self.rng())
 
     def __call__(self, x):
-        # x: (batch, seq_len, d_inner)
+        """
+        Apply the selective state space model to the input sequence.
+        
+        Args:
+            x: Input tensor of shape (batch, seq_len, d_inner).
+        
+        Returns:
+            Output tensor of shape (batch, seq_len, d_inner).
+        """
         A = -jnp.exp(self.log_A)  # (d_inner, state_dim), always < 0
 
         proj = self.x_proj(x)  # (batch, seq_len, dt_rank + 2*state_dim)
@@ -165,6 +193,7 @@ class SelectiveSSM(Module):
         C_t = jnp.transpose(C_seq, (1, 0, 2))      # (seq_len, batch, state_dim)
 
         def step(h, inputs):
+            """Single step of the selective SSM recurrence."""
             u, dt, B, C = inputs
             dA = jnp.exp(A[None] * dt[:, :, None])       # (batch, d_inner, state_dim)
             dB = dt[:, :, None] * B[:, None, :]            # (batch, d_inner, state_dim)
@@ -177,21 +206,24 @@ class SelectiveSSM(Module):
 
 
 class MambaBlock(Module):
-    """The full Mamba block (Gu & Dao, 2023): input projection -> causal
-    depthwise `Conv` -> SiLU -> `SelectiveSSM` -> SiLU-gate -> output
-    projection. `SelectiveSSM` above is only the core recurrence; this is
-    the actual drop-in replacement for a `TransformerBlock`'s attention
-    sub-layer -- same "takes `(batch, seq_len, d_model)`, returns the same
-    shape" contract, so it composes into a `Sequential`/residual stack the
-    same way `TransformerBlock` does (residual add is left to the caller,
-    same convention as `MultiHeadAttention`/`MLP` inside `TransformerBlock`).
-
-    `d_inner` is the expanded inner width the SSM actually runs at
-    (default `2 * d_model`, the paper's expansion factor); `in_proj` maps
-    `d_model -> 2 * d_inner` in one matmul and splits the result into the
-    SSM branch and the parallel SiLU gate `z`. The depthwise `Conv` is
-    causally padded (`kernel_size - 1` on the left, `0` on the right) so
-    output length matches input length without leaking future timesteps.
+    """
+    Mamba block: A selective state space model architecture.
+    
+    Mamba is a linear-time sequence modeling architecture that combines
+    selective state space models with gating mechanisms. It achieves
+    transformer-quality performance while maintaining linear complexity
+    in sequence length.
+    
+    Attributes:
+        d_model: Model dimension (input/output dimension).
+        d_inner: Inner dimension (default: d_model * 2).
+        state_dim: State dimension for the SSM (default: 16).
+        conv_kernel: Kernel size for the causal convolution (default: 4).
+        dt_rank: Rank for the low-rank dt projection (default: d_inner // 16).
+    
+    Example:
+        >>> mamba = MambaBlock(d_model=512, state_dim=16)
+        >>> output = mamba(input_sequence)
     """
 
     d_model: int
@@ -201,6 +233,7 @@ class MambaBlock(Module):
     dt_rank: int = None
 
     def setup(self):
+        """Initialize Mamba block components."""
         d_inner = self.d_inner if self.d_inner is not None else self.d_model * 2
         self._d_inner = d_inner
 
@@ -214,7 +247,15 @@ class MambaBlock(Module):
         self.out_proj = Dense(d_inner, self.d_model, use_bias=False, key=self.rng())
 
     def __call__(self, x):
-        # x: (batch, seq_len, d_model)
+        """
+        Apply the Mamba block to the input sequence.
+        
+        Args:
+            x: Input tensor of shape (batch, seq_len, d_model).
+        
+        Returns:
+            Output tensor of shape (batch, seq_len, d_model).
+        """
         x_in, z = jnp.split(self.in_proj(x), 2, axis=-1)   # each (batch, seq_len, d_inner)
         x_in = jax.nn.silu(self.conv(x_in))
         y = self.ssm(x_in)

@@ -1,7 +1,4 @@
-"""Accumulate: gradient accumulation wrapper, implemented with jax.lax.cond
-so it's fully traceable without a nested loop primitive. Generic -- wraps
-any Optimizer, doesn't know or care what it is.
-"""
+
 
 from __future__ import annotations
 from typing import NamedTuple, Any
@@ -11,25 +8,7 @@ from ..base import Optimizer, _tree_map
 
 
 class Accumulate:
-    """Factory: buffers `steps` micro-step gradients (summed, then averaged
-    on apply) and only runs the wrapped optimizer's update once they've
-    accumulated -- every other call emits an all-zero update and just keeps
-    buffering. Implemented with `jax.lax.cond`, so it's fully traceable and
-    composes with jit/scan/Loop directly; it does not need a nested loop
-    primitive.
 
-    Usage:
-        opt = O.Accumulate(4)(O.AdamW(lr=1e-4))
-
-    Step source: if an external `step` is threaded in via
-    `update(..., step=...)`, Accumulate decides when to apply from that
-    value directly (`(step + 1) % steps == 0`) instead of an internal
-    counter -- this is the recommended mode, since it guarantees Accumulate
-    and any Schedule composed with it agree on what "step" means (see
-    Schedule's docstring for the concrete ambiguity this avoids). Without an
-    explicit `step`, Accumulate keeps its own internal counter and applies
-    every `steps`-th call.
-    """
 
     def __init__(self, steps: int):
         assert steps >= 1, "Accumulate(steps) needs steps >= 1"

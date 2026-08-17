@@ -1,18 +1,4 @@
-"""Adan (Adaptive Nesterov Momentum), Xie et al. 2022:
-https://arxiv.org/abs/2208.06677
 
-Tracks three moments: a momentum of the gradient, a momentum of the
-gradient *difference* between consecutive steps, and a second-moment
-estimate of a Nesterov-corrected gradient. This is a good-faith
-implementation of the update rule from the paper, with weight decay
-adapted to this library's `apply_updates(params, updates) = params +
-updates` convention (an additive `-lr * weight_decay * params` term)
-rather than the paper's multiplicative `params / (1 + lr * weight_decay)`
-form -- the two are close for small `lr * weight_decay` but not identical.
-This hasn't been numerically cross-checked against the authors' reference
-implementation; treat it as a solid starting point rather than a verified
-drop-in if you need to reproduce published numbers exactly.
-"""
 
 from __future__ import annotations
 from typing import NamedTuple, Any

@@ -1,18 +1,4 @@
-"""Adafactor (Shazeer & Stern, 2018): https://arxiv.org/abs/1804.04235
 
-The memory saving comes from factoring the second-moment accumulator of a
-2D leaf into a row vector and a column vector (O(m+n) state) instead of a
-full (m, n) matrix (O(m*n) state) -- the same order of memory as the
-params themselves, unlike Adam's 2x. Leaves with ndim != 2 fall back to a
-plain (unfactored) second-moment accumulator, since there's no natural
-row/column split to factor along; this is still standard Adafactor
-(matches how e.g. 1D bias vectors are handled in the original paper).
-
-This implementation omits the optional relative-step-size / warmup
-learning rate schedule from the original paper -- `lr` here is used
-directly, same as every other optimizer in this file. Compose with
-`wrapper.Schedule` if you want Adafactor's characteristic warmup curve.
-"""
 
 from __future__ import annotations
 from typing import NamedTuple, Any

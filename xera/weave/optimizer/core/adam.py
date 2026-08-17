@@ -1,6 +1,4 @@
-"""Adam and AdamW -- house every Adam-family variant here rather than
-spinning up a new file per variant.
-"""
+
 
 from __future__ import annotations
 from typing import NamedTuple, Any
@@ -15,11 +13,7 @@ class AdamState(NamedTuple):
 
 
 class Adam(Optimizer):
-    """Plain Adam -- no weight decay at all. For decay, either use `AdamW`
-    below (couples decay into its own update) or wrap this with
-    `wrapper.WeightDecay` for a fully decoupled decay applied outside
-    Adam's own moment estimates.
-    """
+
 
     def __init__(self, lr, b1=0.9, b2=0.999, eps=1e-8):
         self.lr = lr

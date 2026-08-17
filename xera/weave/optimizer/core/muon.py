@@ -1,18 +1,4 @@
-"""Muon (MomentUm Orthogonalized by Newton-schulz).
 
-MuonCore orthogonalizes the momentum of matrix-shaped leaves via a
-quintic Newton-Schulz iteration (coefficients from Keller Jordan's
-original Muon: https://kellerjordan.github.io/posts/muon/). Shape-dispatch
-(2D -> direct, 3D -> vmap over a batch dim, 4D -> flatten/reshape for
-conv kernels) lives inside MuonCore itself, not in a generic wrapper --
-it's part of the mathematical definition of "orthogonalize this leaf",
-not a concern any other optimizer would reuse.
-
-Routing matrix-shaped leaves to MuonCore and everything else to a
-fallback optimizer is *not* special-cased here -- it's an ordinary use of
-Partition. `Muon(...)` below is packed sugar that builds exactly that
-Partition; nothing it does isn't expressible with Partition directly.
-"""
 
 from __future__ import annotations
 from typing import NamedTuple, Any
@@ -52,19 +38,7 @@ class MuonCoreState(NamedTuple):
 
 
 class MuonCore(Optimizer):
-    """The matrix-orthogonalization half of Muon.
 
-    Every leaf passed to this optimizer is assumed eligible for
-    orthogonalization (ndim 2, 3, or 4). Routing non-matrix leaves (biases,
-    gains, embeddings, scalars) to a different optimizer is Partition's
-    job, not this class's -- see the packed `Muon(...)` factory below for
-    the common case, or build the Partition yourself for full control:
-
-        opt = O.Partition([
-            (lambda path, leaf: leaf.ndim == 2, O.MuonCore(lr=0.02)),
-            (lambda path, leaf: True, O.AdamW(lr=1e-4)),
-        ])
-    """
 
     def __init__(self, lr, momentum=0.95, nesterov=True, ns_steps=5,
                  weight_decay=0.0, clip=True):
@@ -157,27 +131,7 @@ def Muon(
     fallback_lr=1e-4,
     include=None,
 ):
-    """Packed Muon: matrix-shaped leaves get Newton-Schulz-orthogonalized
-    momentum (via MuonCore), everything else routes to `fallback`. This is
-    sugar over `Partition` + `MuonCore` -- it's a single source of truth,
-    not a separate implementation, so it can never drift from the
-    composable form:
 
-        opt = O.Partition([
-            (is_matrix_rule, O.MuonCore(lr=0.02, ...)),
-            (lambda path, leaf: True, O.AdamW(lr=1e-4)),
-        ])
-
-    Args:
-        include: optional `(path, leaf) -> bool` predicate overriding the
-            default "route by ndim in (2, 3, 4)" rule for which leaves get
-            orthogonalized.
-        fallback: one of "adamw", "lion", "sgd", an `Optimizer` instance
-            for leaves that don't match, or `None`. `None` means *no*
-            fallback -- every leaf must be matrix-eligible, and `init()`
-            will raise if any leaf isn't (same as building a Partition with
-            no catch-all rule, because that's exactly what this does).
-    """
     core = MuonCore(
         lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps,
         weight_decay=weight_decay, clip=clip,
