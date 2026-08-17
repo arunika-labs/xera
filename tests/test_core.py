@@ -1,5 +1,3 @@
-
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -323,7 +321,31 @@ def test_train_class_has_no_optax_dependency():
     assert "optax" not in src
 
 
-def test_train_rejects_fori_loop():
+def test_train_supports_fori_loop():
+    # loop_type="fori_loop" is a supported first-class option (see Loop),
+    # not just "scan" -- Train should accept and actually use it end to end.
+    key = jax.random.PRNGKey(0)
+    xs = jax.random.normal(key, (16, 4))
+    ys = xs * 2.0
+
+    class MyTrain(weave.Train):
+        def loss_fn(self, pred, target):
+            return weave.Loss.L2(pred, target)
+
+        def get_batch(self, i):
+            return xs, ys
+
+    trainer = MyTrain(optimizer=weave.Adam(lr=5e-2), steps=20, loop_type="fori_loop")
+    assert trainer.loop.type == "fori_loop"
+    model = loom.Dense(4, 4, key=jax.random.PRNGKey(1))
+    loss_before = trainer.loss_fn(model(xs), ys)
+    final_model, _opt_state, losses = trainer.run(model)
+    loss_after = trainer.loss_fn(final_model(xs), ys)
+    assert loss_after < loss_before
+    assert losses.shape == (20,)
+
+
+def test_train_rejects_unknown_loop_type():
     class MyTrain(weave.Train):
         def loss_fn(self, pred, target):
             return weave.Loss.L2(pred, target)
@@ -331,8 +353,8 @@ def test_train_rejects_fori_loop():
         def get_batch(self, i):
             return jnp.ones((2, 4)), jnp.zeros((2, 4))
 
-    with pytest.raises(AssertionError, match="loop_type='scan'"):
-        MyTrain(optimizer=weave.Adam(lr=1e-2), steps=5, loop_type="fori_loop")
+    with pytest.raises(AssertionError, match="loop_type"):
+        MyTrain(optimizer=weave.Adam(lr=1e-2), steps=5, loop_type="while_loop")
 
 
 def test_loop_scan_collects_ys():
@@ -342,11 +364,14 @@ def test_loop_scan_collects_ys():
     assert list(ys) == [0, 0, 1, 3, 6]  # output is carry *before* each step's update
 
 
-def test_loop_fori_loop_correct_arg_order_and_no_ys():
+def test_loop_fori_loop_correct_arg_order_and_collects_ys():
+    # fori_loop follows the same (carry, x) -> (new_carry, output) contract
+    # as scan -- xs is threaded through by value (not the raw index), and
+    # per-step outputs are collected just like scan does.
     loop = weave.Loop(type="fori_loop", steps=5)
-    final, ys = loop.run(lambda carry, i: carry + i, 0)
+    final, ys = loop.run(lambda carry, i: (carry + i, carry), 0)
     assert final == 0 + 1 + 2 + 3 + 4  # same sum as scan -> arg order is right
-    assert ys is None  # fori_loop collects no per-step output, unlike scan
+    assert list(ys) == [0, 0, 1, 3, 6]  # same per-step outputs as scan
 
 
 def test_train_end_to_end():
