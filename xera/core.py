@@ -378,6 +378,13 @@ def param(key, init_fn, shape, dtype=jnp.float32):
 # =============================================================================
 
 
+# Lane width lse's trailing dimension is padded to, purely so its Pallas
+# TPU block shape (..., block_q, _LSE_LANE_PAD) satisfies Mosaic's "last
+# dim divisible by 128" lowering requirement -- see the comment at its
+# out_specs entry in `_autofa_forward`. Only lane 0 carries real data.
+_LSE_LANE_PAD = 128
+
+
 def _autofa_kernel(
     q_ref, k_ref, v_ref, bias_ref, o_ref, l_ref, *,
     block_k: int,
@@ -477,7 +484,7 @@ def _autofa_kernel(
     lse = jnp.where(l_i == 0.0, -jnp.inf, m_i + jnp.log(l_i_safe))
 
     o_ref[0, 0, :, :] = out.astype(o_ref.dtype)
-    l_ref[0, 0, :] = lse
+    l_ref[0, 0, :, 0] = lse
 
 
 def _autofa_pad_inputs(q, k, v, bias, *, has_bias, block_q, block_k):
@@ -562,15 +569,25 @@ def _autofa_forward(
         ],
         out_specs=[
             pl.BlockSpec((1, 1, block_q, head_dim), lambda b, h, i: (b, h, i, 0)),
-            pl.BlockSpec((1, 1, block_q), lambda b, h, i: (b, h, i)),
+            # lse is logically (batch, num_heads, seq_len) -- one scalar per
+            # query row -- but Pallas TPU's Mosaic lowering requires the
+            # *last two* dims of every block shape to be divisible by
+            # (8, 128). A trailing 1-D block of shape (block_q,) fails that
+            # (its last two dims come out as (1, block_q), and 1 % 8 != 0).
+            # We instead carry lse as a (..., seq_len, 1) array so the
+            # block's last two dims are (block_q, 1), and pad the trailing
+            # dim up to 128 lanes so it also satisfies the 128-divisibility
+            # requirement; only column 0 is ever read/written.
+            pl.BlockSpec((1, 1, block_q, _LSE_LANE_PAD), lambda b, h, i: (b, h, i, 0)),
         ],
         out_shape=[
             jax.ShapeDtypeStruct((batch, num_heads, padded_len, head_dim), q.dtype),
-            jax.ShapeDtypeStruct((batch, num_heads, padded_len), jnp.float32),
+            jax.ShapeDtypeStruct((batch, num_heads, padded_len, _LSE_LANE_PAD), jnp.float32),
         ],
         interpret=interpret,
     )(q_p, k_p, v_p, bias_p)
 
+    lse = lse[..., 0]
     if pad_amount > 0:
         out = out[:, :, :seq_len, :]
         lse = lse[:, :, :seq_len]
