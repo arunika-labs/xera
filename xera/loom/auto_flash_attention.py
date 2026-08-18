@@ -9,18 +9,26 @@ picks a flash-attention implementation for the current JAX device:
              requires a sufficiently new GPU (Ampere/sm_80+), a compatible
              cuDNN version, and bf16/fp16 inputs -- cuDNN's fused kernel
              does not support fp32.
-    - Anything else (CPU, etc.) -> unsupported; raises immediately.
+    - Anything else (CPU, etc.), or a GPU/TPU call that the vendor backend
+      above can't serve (unsupported dtype, or a requested feature like
+      bias/local windowing that only the portable kernel supports) ->
+      `xenafl_attention` (see `xera.loom.xenafl_attention`), a pure-jnp
+      tiled attention with online softmax. Dtype-, device-, and
+      feature-agnostic by construction, so it always works as a fallback.
 
-There is no fallback kernel. If the current platform, requested dtype, or
-requested feature (bias, local windowing) isn't supported by the backend
-in play, this raises immediately with an explanation -- it never silently
-substitutes a slower or different implementation.
+On CPU, xenafl is simply the only option -- nothing is being "fallen back
+from", so nothing is printed. On GPU/TPU, if the vendor backend can't
+serve the request and AutoFA drops down to xenafl, a single plain
+`print()` line explains why (not a `warnings.warn` -- this is routine,
+expected behavior, not something that deserves a warning's weight).
 """
 
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+
+from .xenafl_attention import xenafl_attention
 
 
 # cuDNN's fused attention kernel (as of the jax/jaxlib versions this module
@@ -32,6 +40,10 @@ _CUDNN_SUPPORTED_DTYPES = (jnp.bfloat16, jnp.float16)
 
 # Splash attention's Pallas TPU kernel is written and tuned for bf16.
 _SPLASH_SUPPORTED_DTYPES = (jnp.bfloat16,)
+
+
+def _info(reason: str) -> None:
+    print(f"XeraInfo: AutoFA using 'xenafl', because {reason}.")
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +62,7 @@ def _cudnn_compatibility_issue(
     vary by cuDNN version).
     """
     if q.dtype not in _CUDNN_SUPPORTED_DTYPES:
-        supported = ", ".join(str(d) for d in _CUDNN_SUPPORTED_DTYPES)
+        supported = ", ".join(jnp.dtype(d).name for d in _CUDNN_SUPPORTED_DTYPES)
         return f"dtype {q.dtype} is not supported by cuDNN fused attention (supported: {supported})"
     if bias is not None:
         return "additive bias is not supported by AutoFA's cuDNN path"
@@ -99,7 +111,7 @@ def _splash_compatibility_issue(
     this call, or None if it looks compatible.
     """
     if q.dtype not in _SPLASH_SUPPORTED_DTYPES:
-        supported = ", ".join(str(d) for d in _SPLASH_SUPPORTED_DTYPES)
+        supported = ", ".join(jnp.dtype(d).name for d in _SPLASH_SUPPORTED_DTYPES)
         return f"dtype {q.dtype} is not supported by splash attention (supported: {supported})"
     if bias is not None:
         return "additive bias is not supported by splash attention"
@@ -144,7 +156,38 @@ def _flash_attention_splash(
 # Public dispatcher.
 # ---------------------------------------------------------------------------
 
-_VALID_BACKENDS = ("auto", "cudnn", "splash")
+_VALID_BACKENDS = ("auto", "cudnn", "splash", "xenafl")
+
+# Default tile sizes xenafl uses when reached via "auto"/vendor-fallback
+# (not user-configurable through this entry point -- call
+# `xera.loom.xenafl_attention.xenafl_attention` directly for that).
+_XENAFL_BLOCK_Q = 128
+_XENAFL_BLOCK_K = 128
+
+
+def _flash_attention_xenafl(
+    q: jax.Array,
+    k: jax.Array,
+    v: jax.Array,
+    *,
+    causal: bool = False,
+    scale: float | None = None,
+    bias: jax.Array | None = None,
+    local_window_size: int | tuple[int | None, int | None] | None = None,
+) -> jax.Array:
+    """AutoFA's portable-kernel path -- see `xera.loom.xenafl_attention`."""
+    if local_window_size is None:
+        window_left = window_right = None
+    elif isinstance(local_window_size, tuple):
+        window_left, window_right = local_window_size
+    else:
+        window_left = window_right = local_window_size
+
+    return xenafl_attention(
+        q, k, v, bias,
+        causal, scale, window_left, window_right,
+        _XENAFL_BLOCK_Q, _XENAFL_BLOCK_K,
+    )
 
 
 def auto_flash_attention(
@@ -163,27 +206,43 @@ def auto_flash_attention(
 
     Picks a flash-attention implementation for the current JAX device:
 
-        - TPU: Splash Attention (Pallas TPU kernel).
-        - GPU: cuDNN fused attention.
-        - Anything else: unsupported, raises `NotImplementedError`.
+        - TPU: Splash Attention (Pallas TPU kernel), if dtype/features are
+          supported; falls back to xenafl otherwise.
+        - GPU: cuDNN fused attention, if dtype/features are supported;
+          falls back to xenafl otherwise.
+        - Anything else (CPU, etc.): xenafl, always -- it's the only
+          option there, not a "fallback" from anything.
 
-    There is no fallback kernel. If the platform, dtype, or requested
-    feature (bias, local_window_size) isn't supported by the backend that
-    would be used, this raises immediately (`NotImplementedError` for an
-    unsupported platform, `ValueError` for an unsupported dtype/feature
-    combination on an otherwise-supported platform).
+    xenafl (`xera.loom.xenafl_attention`) is a pure-jnp tiled attention
+    with online softmax: dtype-, device-, and feature-agnostic, so it
+    always works regardless of platform, dtype, or whether bias/
+    local_window_size were requested.
+
+    On CPU, nothing is printed -- xenafl is simply the only backend, so
+    there's nothing to report a fallback from. On GPU/TPU, if the vendor
+    backend can't serve the request and AutoFA drops to xenafl instead, a
+    single line is printed explaining why:
+
+        XeraInfo: AutoFA using 'xenafl', because <reason>.
+
+    This is a plain `print()`, not a `warnings.warn` -- it's routine,
+    expected behavior (not a problem to flag), so it doesn't carry a
+    warning's weight. It never fires when cuDNN/splash is used
+    successfully, and never fires under an explicitly forced `backend=`.
 
     Args:
         q, k, v: Arrays of shape (batch, num_heads, seq_len, head_dim).
         causal: If True, apply a causal mask.
         scale: Softmax scale. Defaults to 1/sqrt(head_dim).
-        bias: Optional additive attention bias. Not supported by either
-            backend -- passing this always raises.
-        local_window_size: Optional local attention window. Not supported
-            by either backend -- passing this always raises.
-        backend: One of "auto" (default), "cudnn", or "splash". Use a
-            specific value to force that backend (raises if it's
-            unavailable or doesn't support the requested dtype/features).
+        bias: Optional additive attention bias. Only supported by xenafl
+            -- requesting this under "auto" on GPU/TPU routes to xenafl.
+        local_window_size: Optional local attention window. Only
+            supported by xenafl, same as `bias`.
+        backend: One of "auto" (default), "cudnn", "splash", or "xenafl".
+            Use a specific value to force that backend (raises if it's
+            unavailable or doesn't support the requested dtype/features --
+            forcing a backend means "use exactly this, or fail", no
+            fallback).
 
     Returns:
         Output array of shape (batch, num_heads, seq_len, head_dim).
@@ -205,24 +264,37 @@ def auto_flash_attention(
             raise ValueError(f"AutoFA: cannot use backend='splash': {issue}")
         return _flash_attention_splash(q, k, v, causal=causal, scale=scale)
 
-    # backend == "auto": dispatch by platform. No fallback -- unsupported
-    # platform/dtype/feature combinations raise immediately.
+    if backend == "xenafl":
+        return _flash_attention_xenafl(
+            q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+        )
+
+    # backend == "auto": dispatch by platform, falling back to xenafl
+    # whenever the vendor backend for that platform can't serve the
+    # request. CPU (or anything else) always uses xenafl silently -- it's
+    # the only backend there.
     if platform == "tpu":
         issue = _splash_compatibility_issue(q, bias=bias, local_window_size=local_window_size)
         if issue is not None:
-            raise ValueError(f"AutoFA: cannot run on TPU (backend='splash'): {issue}")
+            _info(issue)
+            return _flash_attention_xenafl(
+                q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+            )
         return _flash_attention_splash(q, k, v, causal=causal, scale=scale)
 
     if platform == "gpu":
         issue = _cudnn_compatibility_issue(q, bias=bias, local_window_size=local_window_size)
         if issue is not None:
-            raise ValueError(f"AutoFA: cannot run on GPU (backend='cudnn'): {issue}")
+            _info(issue)
+            return _flash_attention_xenafl(
+                q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+            )
         return _flash_attention_cudnn(q, k, v, causal=causal, scale=scale)
 
-    raise NotImplementedError(
-        f"AutoFA has no supported backend for platform={platform!r}. "
-        f"Supported platforms are 'tpu' (via splash attention) and 'gpu' "
-        f"(via cuDNN fused attention)."
+    # CPU or anything else: xenafl is simply the only backend -- no
+    # fallback happened, so nothing is printed.
+    return _flash_attention_xenafl(
+        q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
     )
 
 
