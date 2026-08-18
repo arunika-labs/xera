@@ -389,7 +389,7 @@ def test_gpu_compute_capability_parses_dotted_string():
     assert _gpu_compute_capability(device_missing) is None
 
 
-def test_gpu_triton_pallas_unsupported_flags_above_sm80():
+def test_gpu_triton_pallas_unsupported_flags_below_sm80():
     from xera.loom.auto_flash_attention import _gpu_triton_pallas_unsupported
 
     device_80 = mock.MagicMock()
@@ -398,17 +398,21 @@ def test_gpu_triton_pallas_unsupported_flags_above_sm80():
 
     device_86 = mock.MagicMock()
     device_86.compute_capability = "8.6"
-    issue = _gpu_triton_pallas_unsupported(device_86)
-    assert issue is not None
-    assert "sm_86" in issue or "8.6" in issue
+    assert _gpu_triton_pallas_unsupported(device_86) is None
 
     device_89 = mock.MagicMock()
     device_89.compute_capability = "8.9"
-    assert _gpu_triton_pallas_unsupported(device_89) is not None
+    assert _gpu_triton_pallas_unsupported(device_89) is None
 
     device_75 = mock.MagicMock()
-    device_75.compute_capability = "7.5"
-    assert _gpu_triton_pallas_unsupported(device_75) is None
+    device_75.compute_capability = "7.5"  # Turing
+    issue = _gpu_triton_pallas_unsupported(device_75)
+    assert issue is not None
+    assert "sm_75" in issue or "7.5" in issue
+
+    device_70 = mock.MagicMock()
+    device_70.compute_capability = "7.0"  # Volta
+    assert _gpu_triton_pallas_unsupported(device_70) is not None
 
     device_unknown = mock.MagicMock()
     device_unknown.compute_capability = None
@@ -431,7 +435,7 @@ def test_auto_gpu_naive_fallback_always_forces_interpret_true(monkeypatch):
 
     fake_device = mock.MagicMock()
     fake_device.platform = "gpu"
-    fake_device.compute_capability = "8.6"  # e.g. RTX 3090
+    fake_device.compute_capability = "7.5"  # e.g. RTX 2080 Ti (Turing)
 
     afa_module = sys.modules["xera.loom.auto_flash_attention"]
     seen_kwargs = {}
