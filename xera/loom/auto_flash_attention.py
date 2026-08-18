@@ -257,14 +257,14 @@ def _flash_attention_naive(
 # requirement (see _CUDNN_SUPPORTED_DTYPES / _cudnn_compatibility_issue
 # below). Less obvious: Pallas's GPU backend (jax.experimental.pallas.ops.gpu,
 # which the naive kernel would otherwise run compiled on GPU) is built on
-# Triton, and Triton's own GPU codegen has had correctness/lowering issues
-# on Ampere parts above sm_80 (e.g. sm_86, sm_89 -- RTX 30-series/40-series
-# and similar) historically. Rather than let either path raise a confusing
-# vendor-internal error, AutoFA checks compute capability up front under
-# "auto" and routes straight to the naive kernel in Pallas *interpret* mode
-# (bypassing Triton entirely) whenever it detects sm > 8.0. This is
-# correctness-first and slower than compiled execution -- XeraWarning is
-# raised explaining why, same as any other interpret-mode fallback.
+# Triton, and Triton's own GPU codegen doesn't support pre-Ampere parts
+# (sm < 8.0, e.g. sm_75/Turing and older) well. Rather than let either
+# path raise a confusing vendor-internal error, AutoFA checks compute
+# capability up front under "auto" and routes straight to the naive
+# kernel in Pallas *interpret* mode (bypassing Triton entirely) whenever
+# it detects sm < 8.0. This is correctness-first and slower than compiled
+# execution -- XeraWarning is raised explaining why, same as any other
+# interpret-mode fallback.
 # ---------------------------------------------------------------------------
 
 def _gpu_compute_capability(device) -> tuple[int, int] | None:
@@ -287,16 +287,16 @@ def _gpu_compute_capability(device) -> tuple[int, int] | None:
 def _gpu_triton_pallas_unsupported(device) -> str | None:
     """
     Returns a reason string if this GPU's compute capability is known to
-    be unreliable with Pallas's Triton-based GPU backend (sm > 8.0, i.e.
-    newer than plain Ampere/sm_80), or None if it looks fine / unknown.
+    be unreliable with Pallas's Triton-based GPU backend (sm < 8.0, i.e.
+    older than Ampere/sm_80), or None if it looks fine / unknown.
     """
     cc = _gpu_compute_capability(device)
     if cc is None:
         return None
-    if cc > (8, 0):
+    if cc < (8, 0):
         return (
-            f"GPU compute capability sm_{cc[0]}{cc[1]} is newer than "
-            f"sm_80 (plain Ampere); Pallas's Triton-based GPU backend is "
+            f"GPU compute capability sm_{cc[0]}{cc[1]} is older than "
+            f"sm_80 (Ampere); Pallas's Triton-based GPU backend is "
             f"unreliable on these parts (falls back to naive/interpret)"
         )
     return None
