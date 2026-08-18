@@ -18,6 +18,7 @@ from .transformer import MLP, TransformerBlock
 from .recurrent import SSM, SelectiveSSM, MambaBlock
 from .combinators import Sequential, Residual, Lambda
 from .auto_flash_attention import auto_flash_attention
+from .xenafl_attention import xenafl_attention
 from .functional import (
     celu,
     elu,
@@ -81,6 +82,7 @@ __all__ = [
     "Residual",
     "Lambda",
     "auto_flash_attention",
+    "xenafl_attention",
     "celu",
     "elu",
     "gelu",
