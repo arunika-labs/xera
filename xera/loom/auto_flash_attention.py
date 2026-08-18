@@ -91,6 +91,19 @@ def _warn_interpret_mode(backend: str, platform: str) -> None:
     )
 
 
+def _warn_gpu_triton_unsupported(reason: str) -> None:
+    _warn(
+        f"AutoFA: {reason}. Falling back to the naive kernel in Pallas "
+        f"interpret mode (bypasses Triton entirely) rather than risk a "
+        f"silent miscompilation or a confusing lowering error. This is "
+        f"meaningfully slower than compiled execution -- pass "
+        f"backend='naive' with interpret=False explicitly if you've "
+        f"verified it works on your specific GPU/Triton/jaxlib combo, or "
+        f"set XERA_SILENCE_AUTOFA_WARNINGS=1 to silence this warning "
+        f"(the fallback itself still applies)."
+    )
+
+
 # cuDNN's fused attention kernel (as of the jax/jaxlib versions this module
 # targets) only accepts these dtypes; fp32 in particular raises at runtime
 # with a cuDNN-internal error that doesn't say "use bf16/fp16" anywhere in
@@ -238,6 +251,58 @@ def _flash_attention_naive(
 
 
 # ---------------------------------------------------------------------------
+# GPU compute-capability gate.
+#
+# jax.nn.dot_product_attention's cuDNN path is the well-known Ampere+
+# requirement (see _CUDNN_SUPPORTED_DTYPES / _cudnn_compatibility_issue
+# below). Less obvious: Pallas's GPU backend (jax.experimental.pallas.ops.gpu,
+# which the naive kernel would otherwise run compiled on GPU) is built on
+# Triton, and Triton's own GPU codegen has had correctness/lowering issues
+# on Ampere parts above sm_80 (e.g. sm_86, sm_89 -- RTX 30-series/40-series
+# and similar) historically. Rather than let either path raise a confusing
+# vendor-internal error, AutoFA checks compute capability up front under
+# "auto" and routes straight to the naive kernel in Pallas *interpret* mode
+# (bypassing Triton entirely) whenever it detects sm > 8.0. This is
+# correctness-first and slower than compiled execution -- XeraWarning is
+# raised explaining why, same as any other interpret-mode fallback.
+# ---------------------------------------------------------------------------
+
+def _gpu_compute_capability(device) -> tuple[int, int] | None:
+    """
+    Returns a GPU device's (major, minor) compute capability, or None if it
+    can't be determined (e.g. non-GPU device, or a jaxlib version that
+    doesn't expose the attribute -- fails open rather than raising, since
+    this is a best-effort compatibility check, not a hard requirement).
+    """
+    cc = getattr(device, "compute_capability", None)
+    if not cc:
+        return None
+    try:
+        major_str, minor_str = str(cc).split(".")
+        return int(major_str), int(minor_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def _gpu_triton_pallas_unsupported(device) -> str | None:
+    """
+    Returns a reason string if this GPU's compute capability is known to
+    be unreliable with Pallas's Triton-based GPU backend (sm > 8.0, i.e.
+    newer than plain Ampere/sm_80), or None if it looks fine / unknown.
+    """
+    cc = _gpu_compute_capability(device)
+    if cc is None:
+        return None
+    if cc > (8, 0):
+        return (
+            f"GPU compute capability sm_{cc[0]}{cc[1]} is newer than "
+            f"sm_80 (plain Ampere); Pallas's Triton-based GPU backend is "
+            f"unreliable on these parts (falls back to naive/interpret)"
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
 # cuDNN backend (GPU only, requires Ampere+/sm_80+, a compatible cuDNN, and
 # bf16/fp16 inputs -- fp32 is not supported by the fused kernel).
 # ---------------------------------------------------------------------------
@@ -356,6 +421,45 @@ def _flash_attention_splash(
     return jax.vmap(per_example)(q, k, v)
 
 
+def _flash_attention_gpu_naive_fallback(
+    q: jax.Array,
+    k: jax.Array,
+    v: jax.Array,
+    *,
+    causal: bool,
+    scale: float | None,
+    bias: jax.Array | None,
+    local_window_size,
+) -> jax.Array:
+    """
+    The naive kernel's fallback path specifically on GPU, when cuDNN isn't
+    usable (unsupported dtype/feature, or cuDNN itself raised).
+
+    Unlike CPU/TPU fallbacks, this always forces `interpret=True` rather
+    than letting compiled Pallas run on GPU: Pallas's GPU backend is
+    Triton-based, and Triton's GPU codegen has had correctness/lowering
+    issues on Ampere parts newer than plain sm_80 (e.g. sm_86/sm_89 --
+    RTX 30/40-series and similar). Since AutoFA can't always tell in
+    advance whether a given GPU/jaxlib/Triton combination is affected, the
+    naive kernel simply has no compiled path on GPU under "auto" -- it is
+    always run in interpret mode there, with a warning explaining why.
+    """
+    reason = _gpu_triton_pallas_unsupported(jax.devices()[0])
+    if reason is None:
+        reason = (
+            "Pallas's Triton-based GPU backend has known correctness/"
+            "lowering issues on some Ampere-and-newer GPUs (sm > 8.0); "
+            "AutoFA does not compile the naive kernel on GPU as a "
+            "precaution"
+        )
+    _warn_gpu_triton_unsupported(reason)
+    return _flash_attention_naive(
+        q, k, v, causal=causal, scale=scale, bias=bias,
+        local_window_size=local_window_size, interpret=True,
+        _warn_if_interpret=False,  # avoid a second, redundant interpret warning
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public dispatcher.
 # ---------------------------------------------------------------------------
@@ -459,8 +563,9 @@ def auto_flash_attention(
         issue = _cudnn_compatibility_issue(q, bias=bias, local_window_size=local_window_size)
         if issue is not None:
             _warn_fallback("cudnn", "naive", issue)
-            return _flash_attention_naive(
-                q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+            return _flash_attention_gpu_naive_fallback(
+                q, k, v, causal=causal, scale=scale, bias=bias,
+                local_window_size=local_window_size,
             )
         _warn_selected("cudnn")
         try:
@@ -471,8 +576,9 @@ def auto_flash_attention(
                 f"cuDNN fused attention raised (likely unsupported GPU/cuDNN "
                 f"version or shape not covered by AutoFA's preflight checks): {e}",
             )
-            return _flash_attention_naive(
-                q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+            return _flash_attention_gpu_naive_fallback(
+                q, k, v, causal=causal, scale=scale, bias=bias,
+                local_window_size=local_window_size,
             )
 
     # CPU or anything else.
