@@ -31,6 +31,7 @@ L = xera.loom       # layers / modules
 W = xera.weave       # training loop, loss, optimizers, metrics, callbacks
 O = xera.weave.optimizer  # optimizer / wrapper
 S = xera.serialize    # save / load (safetensors)
+F = xera.loom.functional  # activation / utility functions
 ```
 
 ### `L` — layers
@@ -56,6 +57,16 @@ class Trainer(W.Train):
 
 trainer = Trainer(optimizer=W.Adam(lr=1e-3), steps=1000)
 trained_model = trainer(model)
+```
+
+### `F` — functional
+
+```python
+import xera.loom.functional as F
+
+y = F.relu(x)
+y = F.gelu(x)
+y = F.softmax(x, axis=-1)
 ```
 
 ### `O` — optimizers
