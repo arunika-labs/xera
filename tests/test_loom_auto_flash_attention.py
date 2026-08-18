@@ -368,3 +368,131 @@ def test_auto_bias_on_simulated_gpu_falls_back_with_feature_warning(monkeypatch)
 
     messages = [str(w.message) for w in caught]
     assert any("bias" in m and "naive" in m for m in messages)
+
+
+def test_gpu_compute_capability_parses_dotted_string():
+    from xera.loom.auto_flash_attention import _gpu_compute_capability
+
+    device_80 = mock.MagicMock()
+    device_80.compute_capability = "8.0"
+    assert _gpu_compute_capability(device_80) == (8, 0)
+
+    device_86 = mock.MagicMock()
+    device_86.compute_capability = "8.6"
+    assert _gpu_compute_capability(device_86) == (8, 6)
+
+    device_none = mock.MagicMock()
+    device_none.compute_capability = None
+    assert _gpu_compute_capability(device_none) is None
+
+    device_missing = object()  # no compute_capability attribute at all
+    assert _gpu_compute_capability(device_missing) is None
+
+
+def test_gpu_triton_pallas_unsupported_flags_above_sm80():
+    from xera.loom.auto_flash_attention import _gpu_triton_pallas_unsupported
+
+    device_80 = mock.MagicMock()
+    device_80.compute_capability = "8.0"
+    assert _gpu_triton_pallas_unsupported(device_80) is None
+
+    device_86 = mock.MagicMock()
+    device_86.compute_capability = "8.6"
+    issue = _gpu_triton_pallas_unsupported(device_86)
+    assert issue is not None
+    assert "sm_86" in issue or "8.6" in issue
+
+    device_89 = mock.MagicMock()
+    device_89.compute_capability = "8.9"
+    assert _gpu_triton_pallas_unsupported(device_89) is not None
+
+    device_75 = mock.MagicMock()
+    device_75.compute_capability = "7.5"
+    assert _gpu_triton_pallas_unsupported(device_75) is None
+
+    device_unknown = mock.MagicMock()
+    device_unknown.compute_capability = None
+    assert _gpu_triton_pallas_unsupported(device_unknown) is None
+
+
+def test_auto_gpu_naive_fallback_always_forces_interpret_true(monkeypatch):
+    """
+    On GPU, once AutoFA decides to fall back to the naive kernel (cuDNN
+    unsupported dtype/feature, or cuDNN raising), it must never run the
+    naive kernel compiled -- only interpret=True, regardless of compute
+    capability -- because Pallas's GPU backend is Triton-based and known
+    unreliable on some Ampere-and-newer parts. This test does NOT force
+    interpret=True itself (unlike the other simulated-GPU tests above):
+    it asserts AutoFA's own dispatch code passes interpret=True to the
+    naive kernel.
+    """
+    import sys
+    q, k, v = _make_qkv(jax.random.PRNGKey(0), 1, 2, 16, 8)  # fp32 -> cuDNN incompatible
+
+    fake_device = mock.MagicMock()
+    fake_device.platform = "gpu"
+    fake_device.compute_capability = "8.6"  # e.g. RTX 3090
+
+    afa_module = sys.modules["xera.loom.auto_flash_attention"]
+    seen_kwargs = {}
+    real_naive = afa_module._flash_attention_naive
+
+    def spy_naive(*args, **kwargs):
+        seen_kwargs.update(kwargs)
+        kwargs = dict(kwargs)
+        kwargs["interpret"] = True  # this sandbox has no real GPU/Pallas backend
+        return real_naive(*args, **kwargs)
+
+    monkeypatch.setattr(afa_module, "_flash_attention_naive", spy_naive)
+
+    with mock.patch("jax.devices", return_value=[fake_device]):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            out = loom.auto_flash_attention(q, k, v, causal=True)
+
+    assert seen_kwargs.get("interpret") is True
+    messages = [str(w.message) for w in caught]
+    assert any("triton" in m.lower() for m in messages)
+    ref = reference_attention(q, k, v, causal=True)
+    assert jnp.allclose(out, ref, atol=1e-4)
+
+
+def test_auto_gpu_cudnn_failure_falls_back_to_interpret_naive(monkeypatch):
+    """cuDNN raising at runtime (not just a preflight-detectable issue)
+    must also land on naive with interpret=True, same as the preflight
+    dtype/feature rejections above."""
+    import sys
+    q, k, v = _make_qkv(jax.random.PRNGKey(0), 1, 2, 16, 8)
+    q = q.astype(jnp.bfloat16)
+    k = k.astype(jnp.bfloat16)
+    v = v.astype(jnp.bfloat16)
+
+    fake_device = mock.MagicMock()
+    fake_device.platform = "gpu"
+    fake_device.compute_capability = "8.0"  # even plain sm_80: cuDNN itself failed here
+
+    afa_module = sys.modules["xera.loom.auto_flash_attention"]
+    seen_kwargs = {}
+    real_naive = afa_module._flash_attention_naive
+
+    def spy_naive(*args, **kwargs):
+        seen_kwargs.update(kwargs)
+        kwargs = dict(kwargs)
+        kwargs["interpret"] = True
+        return real_naive(*args, **kwargs)
+
+    monkeypatch.setattr(afa_module, "_flash_attention_naive", spy_naive)
+    monkeypatch.setattr(
+        afa_module,
+        "_flash_attention_cudnn",
+        mock.MagicMock(side_effect=RuntimeError("simulated cuDNN failure")),
+    )
+
+    with mock.patch("jax.devices", return_value=[fake_device]):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            loom.auto_flash_attention(q, k, v)
+
+    assert seen_kwargs.get("interpret") is True
+    messages = [str(w.message) for w in caught]
+    assert any("cudnn" in m.lower() and "naive" in m.lower() for m in messages)
