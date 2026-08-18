@@ -44,13 +44,13 @@ Use `warnings.simplefilter("ignore", XeraWarning)` or the
 
 from __future__ import annotations
 
-import functools
 import os
 import warnings
 
 import jax
 import jax.numpy as jnp
-from jax.experimental import pallas as pl
+
+from xera import core as _core
 
 
 class XeraWarning(UserWarning):
@@ -104,140 +104,18 @@ _CUDNN_SUPPORTED_DTYPES = (jnp.bfloat16, jnp.float16)
 # Supports causal masking, additive bias, and local windowing -- a superset
 # of what the vendor backends (cuDNN/splash) are used for here, so it is
 # always a valid fallback no matter what the caller asked for.
+#
+# The actual forward/backward math lives in `xera.core` as a
+# `jax.custom_vjp` (`xera.core.auto_flash_attention` +
+# `_autofa_forward`/`_autofa_backward`): the Pallas kernel here is built
+# from `fori_loop` + dynamic-start (`pl.ds`) reads, which JAX's automatic
+# differentiation cannot linearize through on its own, so a hand-written
+# backward pass is required rather than relying on `jax.grad` directly.
+# This function is a thin, backend-selection-facing wrapper around that
+# core primitive: it keeps the same signature/behavior it always had
+# (padding/masking defaults, interpret-mode auto-detection, warnings), it
+# now just also supports `jax.grad`.
 # ---------------------------------------------------------------------------
-
-def _flash_attention_naive_kernel(
-    q_ref, k_ref, v_ref, bias_ref, o_ref, *,
-    block_k: int,
-    seq_len: int,
-    causal: bool,
-    scale: float,
-    has_bias: bool,
-    window_left: int | None,
-    window_right: int | None,
-):
-    """
-    Pallas kernel body for one (batch, head, q_block) grid cell.
-
-    q_ref:    (1, 1, block_q, head_dim) -- this program's slice of (padded)
-              queries.
-    k_ref:    (1, 1, padded_seq_len, head_dim) -- full (padded) keys for
-              this (batch, head).
-    v_ref:    (1, 1, padded_seq_len, head_dim) -- full (padded) values for
-              this (batch, head).
-    bias_ref: (1, 1, block_q, padded_seq_len) -- additive bias slice for
-              this (batch, head, q_block), or a dummy zero-size ref when
-              `has_bias` is False (never read in that case).
-    o_ref:    (1, 1, block_q, head_dim) -- output slice to write.
-
-    The leading (1, 1) axes come from the BlockSpec's batch/head blocking
-    and are squeezed out immediately below.
-
-    `seq_len` is the *original*, unpadded sequence length -- the caller
-    (`_flash_attention_naive`) pads q/k/v (and bias, if given) up to a
-    multiple of the block sizes before calling into Pallas, so every
-    `pl.ds` read in this kernel is always in-bounds. `seq_len` is only
-    used to mask out padding positions from the softmax and to compute
-    correct query/key positions for causal/local-window masking.
-
-    Implements the online-softmax recurrence: keys/values are streamed in
-    chunks of `block_k`, and the running max / running sum / running
-    weighted-value accumulator are updated chunk by chunk, so the full
-    (block_q, seq_len) score matrix is never materialized at once.
-    """
-    q_block_idx = pl.program_id(2)
-    block_q = q_ref.shape[2]
-    head_dim = q_ref.shape[3]
-
-    q = q_ref[0, 0, :, :] * scale
-
-    m_i = jnp.full((block_q,), -jnp.inf, dtype=jnp.float32)
-    l_i = jnp.zeros((block_q,), dtype=jnp.float32)
-    acc = jnp.zeros((block_q, head_dim), dtype=jnp.float32)
-
-    padded_seq_len = k_ref.shape[2]
-    num_k_blocks = padded_seq_len // block_k
-
-    def body(k_idx, carry):
-        m_i, l_i, acc = carry
-        k_start = k_idx * block_k
-
-        # Always in-bounds: k_ref/v_ref were padded up to a multiple of
-        # block_k by the caller, so [k_start, k_start + block_k) never
-        # exceeds padded_seq_len.
-        k_block = k_ref[0, 0, pl.ds(k_start, block_k), :]
-        v_block = v_ref[0, 0, pl.ds(k_start, block_k), :]
-
-        scores = jnp.dot(q, k_block.T, preferred_element_type=jnp.float32)
-
-        if has_bias:
-            bias_block = bias_ref[0, 0, :, pl.ds(k_start, block_k)]
-            scores = scores + bias_block.astype(jnp.float32)
-
-        # True sequence position of each column/row in this block.
-        k_pos = k_start + jax.lax.iota(jnp.int32, block_k)[None, :]
-        q_pos = q_block_idx * block_q + jax.lax.iota(jnp.int32, block_q)[:, None]
-
-        # Positions >= seq_len are padding and must never receive
-        # probability mass.
-        in_bounds = k_pos < seq_len
-        scores = jnp.where(in_bounds, scores, -jnp.inf)
-
-        if causal:
-            scores = jnp.where(q_pos >= k_pos, scores, -jnp.inf)
-
-        if window_left is not None or window_right is not None:
-            rel = q_pos - k_pos  # > 0 means key is to the left of query
-            if window_left is not None:
-                scores = jnp.where(rel <= window_left, scores, -jnp.inf)
-            if window_right is not None:
-                scores = jnp.where(-rel <= window_right, scores, -jnp.inf)
-
-        m_ij = jnp.max(scores, axis=-1)
-        m_new = jnp.maximum(m_i, m_ij)
-
-        # When a block contributes no valid (in-window/in-bounds/causal)
-        # positions at all, its scores are entirely -inf, so m_ij = -inf.
-        # If m_i is also still -inf (no valid block seen yet for this
-        # query row), m_new stays -inf and `exp(m_i - m_new)` below would
-        # be `exp(-inf - (-inf)) = exp(nan) = nan`. Guard explicitly: when
-        # m_new is -inf, nothing valid has been seen yet, so alpha (the
-        # rescaling factor for the running accumulator) is simply 0 --
-        # there is nothing to rescale, since acc/l_i are still all-zero.
-        m_new_is_neg_inf = jnp.isneginf(m_new)
-        p = jnp.where(
-            m_new_is_neg_inf[:, None], 0.0, jnp.exp(scores - m_new[:, None])
-        )
-        alpha = jnp.where(m_new_is_neg_inf, 0.0, jnp.exp(m_i - m_new))
-
-        l_new = alpha * l_i + jnp.sum(p, axis=-1)
-        acc_new = acc * alpha[:, None] + jnp.dot(
-            p.astype(v_block.dtype), v_block, preferred_element_type=jnp.float32
-        )
-
-        return m_new, l_new, acc_new
-
-    def skip_body(k_idx, carry):
-        return carry
-
-    def loop_body(k_idx, carry):
-        if causal:
-            # Skip key blocks entirely to the future of this query block.
-            # (Local windowing does not get the same skip: the window can
-            # start anywhere in the sequence, so no block is unconditionally
-            # irrelevant the way "future" blocks are under causal masking.)
-            k_start = k_idx * block_k
-            q_block_start = q_block_idx * block_q
-            needed = k_start <= (q_block_start + block_q - 1)
-            return jax.lax.cond(needed, body, skip_body, k_idx, carry)
-        return body(k_idx, carry)
-
-    m_i, l_i, acc = jax.lax.fori_loop(0, num_k_blocks, loop_body, (m_i, l_i, acc))
-
-    l_i_safe = jnp.where(l_i == 0.0, 1.0, l_i)
-    out = acc / l_i_safe[:, None]
-    o_ref[0, 0, :, :] = out.astype(o_ref.dtype)
-
 
 def _flash_attention_naive(
     q: jax.Array,
@@ -261,7 +139,8 @@ def _flash_attention_naive(
     superset *feature-wise*: causal masking, additive bias, local
     windowing, and arbitrary dtypes are all supported unconditionally, so
     this always has somewhere for `auto_flash_attention` to fall back to
-    regardless of what cuDNN/splash can or can't handle.
+    regardless of what cuDNN/splash can or can't handle. It is
+    differentiable via a custom VJP -- see `xera.core.auto_flash_attention`.
 
     Args:
         q, k, v: Arrays of shape (batch, num_heads, seq_len, head_dim).
@@ -283,7 +162,7 @@ def _flash_attention_naive(
     Returns:
         Output array of shape (batch, num_heads, seq_len, head_dim).
     """
-    batch, num_heads, seq_len, head_dim = q.shape
+    _batch, _num_heads, seq_len, head_dim = q.shape
     if scale is None:
         scale = 1.0 / (head_dim ** 0.5)
 
@@ -305,74 +184,18 @@ def _flash_attention_naive(
     block_q = min(block_q, seq_len)
     block_k = min(block_k, seq_len)
 
-    # Pad the sequence dimension up to a multiple of both block sizes so
-    # every dynamic-start `pl.ds` read inside the kernel is guaranteed
-    # in-bounds. Pallas does not bounds-check dynamic-start reads, so an
-    # unclamped/unpadded out-of-range read would silently return
-    # incorrect data rather than erroring -- padding removes the
-    # possibility of that happening at all. Padding positions are masked
-    # out inside the kernel via `seq_len` (the original, unpadded length).
-    padded_len_q = pl.cdiv(seq_len, block_q) * block_q
-    padded_len_k = pl.cdiv(seq_len, block_k) * block_k
-    padded_len = max(padded_len_q, padded_len_k)
-
-    pad_amount = padded_len - seq_len
-    if pad_amount > 0:
-        pad_width = [(0, 0), (0, 0), (0, pad_amount), (0, 0)]
-        q = jnp.pad(q, pad_width)
-        k = jnp.pad(k, pad_width)
-        v = jnp.pad(v, pad_width)
-
     has_bias = bias is not None
-    if has_bias:
-        bias = jnp.broadcast_to(bias, (batch, num_heads, seq_len, seq_len))
-        if pad_amount > 0:
-            bias = jnp.pad(
-                bias,
-                [(0, 0), (0, 0), (0, padded_len - seq_len), (0, padded_len - seq_len)],
-            )
-    else:
-        # Dummy placeholder so the kernel always has 4 Ref args regardless
-        # of has_bias; never read inside the kernel when has_bias is False.
-        bias = jnp.zeros((1, 1, block_q, padded_len), dtype=q.dtype)
+    if not has_bias:
+        # Dummy placeholder so `xera.core.auto_flash_attention` always sees
+        # an array for its `bias` (differentiable) argument; never read
+        # when `has_bias` is False.
+        bias = jnp.zeros((1, 1, block_q, block_q), dtype=q.dtype)
 
-    grid = (batch, num_heads, padded_len // block_q)
-
-    kernel = functools.partial(
-        _flash_attention_naive_kernel,
-        block_k=block_k,
-        seq_len=seq_len,
-        causal=causal,
-        scale=scale,
-        has_bias=has_bias,
-        window_left=window_left,
-        window_right=window_right,
+    return _core.auto_flash_attention(
+        q, k, v, bias,
+        has_bias, causal, scale, window_left, window_right,
+        block_q, block_k, interpret,
     )
-
-    bias_block_spec = (
-        pl.BlockSpec((1, 1, block_q, padded_len), lambda b, h, i: (b, h, i, 0))
-        if has_bias
-        else pl.BlockSpec((1, 1, block_q, padded_len), lambda b, h, i: (0, 0, 0, 0))
-    )
-
-    out = pl.pallas_call(
-        kernel,
-        grid=grid,
-        in_specs=[
-            pl.BlockSpec((1, 1, block_q, head_dim), lambda b, h, i: (b, h, i, 0)),
-            pl.BlockSpec((1, 1, padded_len, head_dim), lambda b, h, i: (b, h, 0, 0)),
-            pl.BlockSpec((1, 1, padded_len, head_dim), lambda b, h, i: (b, h, 0, 0)),
-            bias_block_spec,
-        ],
-        out_specs=pl.BlockSpec((1, 1, block_q, head_dim), lambda b, h, i: (b, h, i, 0)),
-        out_shape=jax.ShapeDtypeStruct((batch, num_heads, padded_len, head_dim), q.dtype),
-        interpret=interpret,
-    )(q, k, v, bias)
-
-    if pad_amount > 0:
-        out = out[:, :, :seq_len, :]
-
-    return out
 
 
 # ---------------------------------------------------------------------------
