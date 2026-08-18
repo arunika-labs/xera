@@ -31,7 +31,7 @@ import unittest.mock as mock
 import jax.numpy as jnp
 import pytest
 import xera.loom as loom
-from xera.loom.auto_flash_attention import (
+from xera.loom.flash_attention.auto_flash_attention import (
     _cudnn_compatibility_issue,
     _splash_compatibility_issue,
 )

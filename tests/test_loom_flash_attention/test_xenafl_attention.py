@@ -5,7 +5,7 @@ checked against a plain non-tiled reference implementation."""
 import jax
 import jax.numpy as jnp
 import pytest
-from xera.loom.xenafl_attention import xenafl_attention
+from xera.loom.flash_attention.xenafl_attention import xenafl_attention
 
 
 def reference_attention(q, k, v, *, causal=False, scale=None, bias=None, window_left=None, window_right=None):
