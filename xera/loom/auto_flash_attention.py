@@ -184,6 +184,45 @@ def _flash_attention_naive(
     block_q = min(block_q, seq_len)
     block_k = min(block_k, seq_len)
 
+    if not interpret:
+        # Pallas TPU (Mosaic) requires the last two dims of every block
+        # shape to be divisible by (8, 128). Our q/k/v/out block shapes
+        # are (..., block_{q,k}, head_dim), so that means block_q/block_k
+        # must be multiples of 8 and head_dim a multiple of 128 whenever
+        # we're actually lowering to TPU (not just running in Pallas
+        # interpret mode, which never hits Mosoic and so never enforces
+        # this). Raise early with an actionable message instead of
+        # letting Mosaic's lower-level error surface.
+        def _round_up(n: int, multiple: int) -> int:
+            return -(-n // multiple) * multiple
+
+        if head_dim % 128 != 0:
+            raise ValueError(
+                f"AutoFA naive kernel on TPU requires head_dim to be a "
+                f"multiple of 128 (got head_dim={head_dim}). Pad your "
+                f"q/k/v head dimension up to {_round_up(head_dim, 128)} "
+                f"(e.g. jnp.pad(..., [(0, 0), (0, 0), (0, 0), "
+                f"(0, {_round_up(head_dim, 128) - head_dim})])) and slice "
+                f"the output back down afterwards, or run with "
+                f"interpret=True (much slower; correctness-only)."
+            )
+        if block_q % 8 != 0:
+            fixed = _round_up(block_q, 8)
+            raise ValueError(
+                f"AutoFA naive kernel on TPU requires block_q to be a "
+                f"multiple of 8 (got block_q={block_q}, after clamping to "
+                f"seq_len={seq_len}). Pass block_q={fixed} (or another "
+                f"multiple of 8), or run with interpret=True."
+            )
+        if block_k % 8 != 0:
+            fixed = _round_up(block_k, 8)
+            raise ValueError(
+                f"AutoFA naive kernel on TPU requires block_k to be a "
+                f"multiple of 8 (got block_k={block_k}, after clamping to "
+                f"seq_len={seq_len}). Pass block_k={fixed} (or another "
+                f"multiple of 8), or run with interpret=True."
+            )
+
     has_bias = bias is not None
     if not has_bias:
         # Dummy placeholder so `xera.core.auto_flash_attention` always sees
