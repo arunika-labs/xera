@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xera"
-version = "0.0.2"
+version = "0.1.0"
 description = "A neural network library in JAX, designed for functional programming needs and ease of use with a modern API."
 readme = "README.md"
 requires-python = ">=3.10"
