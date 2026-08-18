@@ -1,15 +1,31 @@
 """Tests for xera.loom.auto_flash_attention: AutoFA backend dispatch.
 
-There is no naive/portable kernel and no silent fallback. AutoFA supports
-exactly two backends -- cuDNN (GPU) and splash attention (TPU) -- and
-raises immediately for any unsupported platform, dtype, or feature
-(additive bias, local windowing) rather than substituting a different
-implementation. This environment has no GPU/TPU, so the real backend
-calls (`_flash_attention_cudnn` / `_flash_attention_splash`) aren't
-exercised end-to-end here; the preflight compatibility checks and the
-dispatcher's error behavior are.
+AutoFA supports three backends: cuDNN (GPU), splash attention (TPU), and
+xenafl (`xera.loom.xenafl_attention`) -- a pure-jnp, dtype-/device-/
+feature-agnostic implementation that always works, and is used as:
+
+  - The *only* backend on CPU (or any platform other than GPU/TPU). No
+    fallback is happening there, so `auto_flash_attention` never prints
+    anything on CPU.
+  - The fallback on GPU/TPU whenever the vendor backend for that platform
+    (cuDNN/splash) can't serve the request (unsupported dtype, or a
+    feature like bias/local_window_size that only xenafl supports). This
+    prints a single plain `XeraInfo: ...` line explaining why -- not a
+    `warnings.warn`, since falling back to xenafl is routine/expected,
+    not a problem.
+
+Forcing a specific backend (`backend="cudnn"`/`"splash"`/`"xenafl"`)
+never falls back and never prints -- forcing means "use exactly this, or
+raise."
+
+This environment has no GPU/TPU, so the real cuDNN/splash backend calls
+aren't exercised end-to-end here; the preflight compatibility checks and
+the dispatcher's fallback/print behavior are (via a mocked `jax.devices`
+to simulate GPU/TPU platforms).
 """
 
+import io
+import contextlib
 import unittest.mock as mock
 
 import jax.numpy as jnp
@@ -35,6 +51,7 @@ def _make_qkv(batch, heads, seq_len, head_dim, dtype=jnp.bfloat16):
 
 def test_auto_flash_attention_exposed_on_loom():
     assert hasattr(loom, "auto_flash_attention")
+    assert hasattr(loom, "xenafl_attention")
 
 
 def test_invalid_backend_raises_value_error():
@@ -44,28 +61,41 @@ def test_invalid_backend_raises_value_error():
 
 
 def test_naive_backend_no_longer_a_valid_option():
-    # "naive" used to be a valid backend value; it no longer exists.
+    # "naive" used to be a valid backend value; xenafl replaced it.
     q, k, v = _make_qkv(1, 2, 8, 8)
     with pytest.raises(ValueError, match="backend must be one of"):
         loom.auto_flash_attention(q, k, v, backend="naive")
 
 
 # ---------------------------------------------------------------------------
-# Dispatcher: no fallback anywhere -- unsupported platform/dtype/feature
-# raises immediately.
+# Dispatcher: CPU always uses xenafl silently (nothing to fall back from).
 # ---------------------------------------------------------------------------
 
-def test_auto_on_unsupported_platform_raises_not_implemented():
-    # This test environment's real platform is CPU, which AutoFA does not
-    # support at all now that there's no naive/portable kernel.
-    q, k, v = _make_qkv(1, 2, 8, 8)
-    with pytest.raises(NotImplementedError):
-        loom.auto_flash_attention(q, k, v)
+def test_auto_on_cpu_uses_xenafl_and_is_correct():
+    # This test environment's real platform is CPU. xenafl is the only
+    # backend there, so this should just work (no exception).
+    q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
+    out = loom.auto_flash_attention(q, k, v, causal=True)
+    assert out.shape == q.shape
 
+
+def test_auto_on_cpu_prints_nothing():
+    # CPU isn't a fallback from anything -- xenafl is simply the only
+    # option there, so no "XeraInfo" line should appear.
+    q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        loom.auto_flash_attention(q, k, v, causal=True)
+    assert buf.getvalue() == ""
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher: forcing a backend never falls back and never prints.
+# ---------------------------------------------------------------------------
 
 def test_forced_cudnn_backend_raises_without_gpu_support():
-    # Forcing backend="cudnn" on a non-bf16/fp16 or non-GPU-compatible
-    # call must raise, never fall back to anything else.
+    # Forcing backend="cudnn" on a non-bf16/fp16 call must raise, never
+    # fall back to xenafl -- forcing means "use exactly this, or fail".
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     with pytest.raises(ValueError, match="cudnn"):
         loom.auto_flash_attention(q, k, v, backend="cudnn")
@@ -103,53 +133,103 @@ def test_forced_splash_backend_rejects_local_window():
         loom.auto_flash_attention(q, k, v, local_window_size=4, backend="splash")
 
 
-def test_auto_on_simulated_gpu_with_unsupported_dtype_raises():
-    # Simulate a GPU platform (mocking jax.devices()) to exercise the
-    # "auto" dispatch path's GPU branch without needing real GPU hardware.
-    # fp32 is not supported by cuDNN, and there is no fallback -- this
-    # must raise rather than silently using a different implementation.
+def test_forced_backend_never_prints_even_when_raising():
+    q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        with pytest.raises(ValueError):
+            loom.auto_flash_attention(q, k, v, backend="cudnn")
+    assert buf.getvalue() == ""
+
+
+def test_forced_xenafl_backend_works_directly():
+    q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
+    out = loom.auto_flash_attention(q, k, v, causal=True, backend="xenafl")
+    assert out.shape == q.shape
+
+
+def test_forced_xenafl_backend_prints_nothing():
+    q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        loom.auto_flash_attention(q, k, v, causal=True, backend="xenafl")
+    assert buf.getvalue() == ""
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher: on simulated GPU/TPU, an incompatible dtype/feature falls
+# back to xenafl and prints exactly one "XeraInfo" line explaining why.
+# ---------------------------------------------------------------------------
+
+def test_auto_on_simulated_gpu_with_unsupported_dtype_falls_back_and_prints():
     q, k, v = _make_qkv(1, 2, 16, 8, dtype=jnp.float32)
 
     fake_device = mock.MagicMock()
     fake_device.platform = "gpu"
 
+    buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
-        with pytest.raises(ValueError, match="cannot run on GPU"):
-            loom.auto_flash_attention(q, k, v, causal=True)
+        with contextlib.redirect_stdout(buf):
+            out = loom.auto_flash_attention(q, k, v, causal=True)
+
+    assert out.shape == q.shape
+    printed = buf.getvalue()
+    assert printed.startswith("XeraInfo:")
+    assert "xenafl" in printed
+    assert "float32" in printed
+    assert len(printed.strip().splitlines()) == 1
 
 
-def test_auto_on_simulated_gpu_with_bias_raises():
+def test_auto_on_simulated_gpu_with_bias_falls_back_and_prints():
     q, k, v = _make_qkv(1, 2, 16, 8, dtype=jnp.bfloat16)
     bias = jnp.zeros((1, 2, 16, 16), dtype=jnp.bfloat16)
 
     fake_device = mock.MagicMock()
     fake_device.platform = "gpu"
 
+    buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
-        with pytest.raises(ValueError, match="bias"):
-            loom.auto_flash_attention(q, k, v, bias=bias)
+        with contextlib.redirect_stdout(buf):
+            out = loom.auto_flash_attention(q, k, v, bias=bias)
+
+    assert out.shape == q.shape
+    printed = buf.getvalue()
+    assert printed.startswith("XeraInfo:")
+    assert "bias" in printed
 
 
-def test_auto_on_simulated_tpu_with_unsupported_dtype_raises():
+def test_auto_on_simulated_tpu_with_unsupported_dtype_falls_back_and_prints():
     q, k, v = _make_qkv(1, 2, 16, 8, dtype=jnp.float32)
 
     fake_device = mock.MagicMock()
     fake_device.platform = "tpu"
 
+    buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
-        with pytest.raises(ValueError, match="cannot run on TPU"):
-            loom.auto_flash_attention(q, k, v, causal=True)
+        with contextlib.redirect_stdout(buf):
+            out = loom.auto_flash_attention(q, k, v, causal=True)
+
+    assert out.shape == q.shape
+    printed = buf.getvalue()
+    assert printed.startswith("XeraInfo:")
+    assert "float32" in printed
 
 
-def test_auto_on_simulated_tpu_with_local_window_raises():
+def test_auto_on_simulated_tpu_with_local_window_falls_back_and_prints():
     q, k, v = _make_qkv(1, 2, 16, 8, dtype=jnp.bfloat16)
 
     fake_device = mock.MagicMock()
     fake_device.platform = "tpu"
 
+    buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
-        with pytest.raises(ValueError, match="local_window_size"):
-            loom.auto_flash_attention(q, k, v, local_window_size=4)
+        with contextlib.redirect_stdout(buf):
+            out = loom.auto_flash_attention(q, k, v, local_window_size=4)
+
+    assert out.shape == q.shape
+    printed = buf.getvalue()
+    assert printed.startswith("XeraInfo:")
+    assert "local_window_size" in printed
 
 
 # ---------------------------------------------------------------------------
