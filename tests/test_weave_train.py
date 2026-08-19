@@ -188,14 +188,17 @@ def test_struct_rng_with_key_works():
     assert not jnp.allclose(out, jnp.zeros((3,)))
 
 
-def test_struct_rng_pool_not_retained_after_init():
-    # Mirrors Module: the key is only live during setup(), not afterward.
+def test_struct_rng_pool_retained_after_init():
+    # Unlike Module, a Struct's RNG pool stays live for the instance's
+    # lifetime when constructed with key=, since Struct methods (e.g.
+    # dataset augmentation) are meant to call self.rng() on every call,
+    # not just once during setup().
     class Datasets(Struct):
         x: jnp.ndarray = None
 
     d = Datasets(x=jnp.zeros((3,)), key=jax.random.PRNGKey(0))
-    with pytest.raises(RuntimeError):
-        d.rng()
+    k = d.rng()
+    assert k.shape == (2,)
 
 
 def test_struct_repr_shows_fields():

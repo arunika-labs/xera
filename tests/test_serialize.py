@@ -186,6 +186,73 @@ def test_save_state_with_partition_optimizer_roundtrip(tmp_path):
 # Top-level xera.serialize namespace
 # ---------------------------------------------------------------------------
 
+def test_load_state_config_drift_raises_by_default(tmp_path):
+    opt = Adam(lr=0.1)
+    state = opt.init({"w": jnp.ones((2,))})
+    path = str(tmp_path / "state.safetensors")
+    save_state(state, path)
+
+    from xera.weave.struct import Struct
+
+    class Cfg(Struct):
+        x: jnp.ndarray = None
+        lr: float = 0.1
+
+    saved = Cfg(x=jnp.ones((3,)), lr=0.1)
+    path2 = str(tmp_path / "cfg.safetensors")
+    save_state(saved, path2)
+
+    changed_template = Cfg(x=jnp.zeros((3,)), lr=0.2)  # hyperparameter changed
+    with pytest.raises(ValueError):
+        load_state(changed_template, path2)
+
+
+def test_load_state_config_drift_allowed_with_release(tmp_path):
+    from xera.weave.struct import Struct
+
+    class Cfg(Struct):
+        x: jnp.ndarray = None
+        lr: float = 0.1
+
+    saved = Cfg(x=jnp.ones((3,)), lr=0.1)
+    path = str(tmp_path / "cfg.safetensors")
+    save_state(saved, path)
+
+    changed_template = Cfg(x=jnp.zeros((3,)), lr=0.2)  # intentional change
+    loaded = load_state(changed_template, path, release=True)
+    assert loaded.lr == 0.2
+    assert jnp.allclose(loaded.x, saved.x)
+
+
+def test_load_state_no_drift_does_not_raise(tmp_path):
+    from xera.weave.struct import Struct
+
+    class Cfg(Struct):
+        x: jnp.ndarray = None
+        lr: float = 0.1
+
+    saved = Cfg(x=jnp.ones((3,)), lr=0.1)
+    path = str(tmp_path / "cfg.safetensors")
+    save_state(saved, path)
+
+    same_template = Cfg(x=jnp.zeros((3,)), lr=0.1)  # same static config
+    loaded = load_state(same_template, path)  # release=False, but no drift
+    assert jnp.allclose(loaded.x, saved.x)
+
+
+def test_save_state_stamps_treedef_metadata(tmp_path):
+    from safetensors import safe_open
+    opt = Adam(lr=0.1)
+    state = opt.init({"w": jnp.ones((2,))})
+    path = str(tmp_path / "state.safetensors")
+    save_state(state, path)
+
+    with safe_open(path, framework="numpy") as f:
+        meta = f.metadata()
+    assert meta is not None
+    assert "xera_treedef" in meta
+
+
 def test_serialize_functions_exposed_at_package_level():
     assert serialize.save_model is save_model
     assert serialize.load_model is load_model

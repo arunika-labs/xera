@@ -108,8 +108,6 @@ class Struct:
         if key is not None:
             object.__setattr__(self, "_rng_pool", RNGPool(key))
         self.setup()
-        if key is not None:
-            object.__delattr__(self, "_rng_pool")
 
     def setup(self):
         """
