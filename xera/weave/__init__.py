@@ -1,8 +1,7 @@
 
 
-from .state import State
+from .struct import Struct
 from .loop import Loop
-from .train import Train
 from .loss import Loss
 from .metrics import Metrics
 from .callback import Callback
@@ -33,9 +32,8 @@ from .optimizer import (
 )
 
 __all__ = [
-    "State",
+    "Struct",
     "Loop",
-    "Train",
     "Loss",
     "Metrics",
     "Callback",

@@ -9,10 +9,10 @@ and inference iterations.
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from .state import State
+from .struct import Struct
 
 
-class Loop(State):
+class Loop(Struct):
     """
     A flexible loop abstraction for JAX-based training and inference.
     

@@ -4,7 +4,7 @@
 State serialization utilities for saving and loading training states.
 
 This module provides functions to save and load training states (optimizer
-states, `xera.weave.Train`/`State` instances, running metrics, step
+states, `xera.weave.Struct` instances, running metrics, step
 counters, and other stateful pytrees) using the safetensors format --
 mirroring `xera.serialize.model`.
 
@@ -13,7 +13,7 @@ disk. Just like `save_model`/`load_model`, this follows a *template*
 pattern: the on-disk file only ever holds the dynamic pytree leaves (as
 named tensors), never the tree structure itself. To load a state back you
 provide a freshly constructed `template` with the same shape (e.g. call
-`optimizer.init(params)` again, or build the same `Train(...)` instance) --
+`optimizer.init(params)` again, or build the same `Struct(...)` instance) --
 exactly how you already provide an empty model with the right architecture
 to `load_model`. Static configuration (learning rates, `loop_type`, the
 `Optimizer` object itself, callables, etc.) intentionally never touches the
@@ -31,10 +31,10 @@ def save_state(state, path):
     """
     Save a training state's dynamic pytree leaves to a safetensors file.
 
-    This flattens `state` (an optimizer state, a `Train`/`State` instance,
+    This flattens `state` (an optimizer state, a `Struct` instance,
     a plain dict of arrays, or any other JAX pytree) and writes every leaf
     as a named tensor -- the same mechanism `save_model` uses for module
-    parameters. Static/config attributes of `State` subclasses are not
+    parameters. Static/config attributes of `Struct` subclasses are not
     leaves and are therefore not written; reconstruct them via `template`
     when loading.
 
@@ -56,13 +56,14 @@ def load_state(template, path):
 
     Loads leaves from a safetensors file and reconstructs a state using
     `template` to determine the pytree structure (including static
-    config, such as an `Optimizer`'s hyperparameters or a `Train`'s
-    `loop_type`) -- the same way `load_model` uses an empty model as an
+    config, such as an `Optimizer`'s hyperparameters or a `Loop`'s
+    `type`) -- the same way `load_model` uses an empty model as an
     architecture template.
 
     Args:
         template: A state with the same structure as the saved state
-            (e.g. the result of calling `optimizer.init(params)` again).
+            (e.g. the result of calling `optimizer.init(params)` again,
+            or a freshly constructed `Struct` instance).
         path: The file path to load the state from.
 
     Returns:

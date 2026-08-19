@@ -217,7 +217,7 @@ class Callback:
     @classmethod
     def save_state(cls, step, state, path_fn):
         """
-        Checkpoint a training state (optimizer state, a `Train`/`State`
+        Checkpoint a training state (optimizer state, a `Struct`
         instance, or any other pytree) to safetensors, ordered so writes
         triggered across training steps land on disk in step order.
 
