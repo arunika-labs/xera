@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 from ..base import Optimizer, _tree_map
+from ...struct import Struct
 
 
-class Cast:
+class Cast(Struct):
 
-
-    def __init__(self, grad_dtype=None, update_dtype=None):
-        self.grad_dtype = grad_dtype
-        self.update_dtype = update_dtype
+    grad_dtype: object = None
+    update_dtype: object = None
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _Cast(inner, self.grad_dtype, self.update_dtype)
 
 
 class _Cast(Optimizer):
-    def __init__(self, inner, grad_dtype, update_dtype):
-        self.inner = inner
-        self.grad_dtype = grad_dtype
-        self.update_dtype = update_dtype
+    inner: Optimizer = None
+    grad_dtype: object = None
+    update_dtype: object = None
 
     def init(self, params):
         return self.inner.init(params)

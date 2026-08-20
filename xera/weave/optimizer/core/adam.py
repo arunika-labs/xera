@@ -14,12 +14,10 @@ class AdamState(NamedTuple):
 
 class Adam(Optimizer):
 
-
-    def __init__(self, lr, b1=0.9, b2=0.999, eps=1e-8):
-        self.lr = lr
-        self.b1 = b1
-        self.b2 = b2
-        self.eps = eps
+    lr: float = None
+    b1: float = 0.9
+    b2: float = 0.999
+    eps: float = 1e-8
 
     def init(self, params):
         m = _tree_map(jnp.zeros_like, params)
@@ -54,12 +52,11 @@ class AdamWState(NamedTuple):
 
 class AdamW(Optimizer):
 
-    def __init__(self, lr, b1=0.9, b2=0.999, eps=1e-8, weight_decay=0.01):
-        self.lr = lr
-        self.b1 = b1
-        self.b2 = b2
-        self.eps = eps
-        self.weight_decay = weight_decay
+    lr: float = None
+    b1: float = 0.9
+    b2: float = 0.999
+    eps: float = 1e-8
+    weight_decay: float = 0.01
 
     def init(self, params):
         m = _tree_map(jnp.zeros_like, params)

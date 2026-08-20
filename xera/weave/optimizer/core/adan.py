@@ -16,13 +16,12 @@ class AdanState(NamedTuple):
 
 class Adan(Optimizer):
 
-    def __init__(self, lr, b1=0.98, b2=0.92, b3=0.99, eps=1e-8, weight_decay=0.0):
-        self.lr = lr
-        self.b1 = b1
-        self.b2 = b2
-        self.b3 = b3
-        self.eps = eps
-        self.weight_decay = weight_decay
+    lr: float = None
+    b1: float = 0.98
+    b2: float = 0.92
+    b3: float = 0.99
+    eps: float = 1e-8
+    weight_decay: float = 0.0
 
     def init(self, params):
         m = _tree_map(jnp.zeros_like, params)

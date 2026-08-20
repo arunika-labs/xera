@@ -5,15 +5,18 @@ from typing import NamedTuple, Any
 import jax
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
+from ...struct import Struct
 
 
-class Lookahead:
+class Lookahead(Struct):
 
+    k: int = 5
+    alpha: float = 0.5
 
-    def __init__(self, k: int = 5, alpha: float = 0.5):
-        assert k >= 1, "Lookahead(k=...) needs k >= 1"
-        self.k = int(k)
-        self.alpha = float(alpha)
+    def setup(self):
+        assert self.k >= 1, "Lookahead(k=...) needs k >= 1"
+        self.k = int(self.k)
+        self.alpha = float(self.alpha)
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _Lookahead(inner, self.k, self.alpha)
@@ -26,10 +29,9 @@ class _LookaheadState(NamedTuple):
 
 
 class _Lookahead(Optimizer):
-    def __init__(self, inner, k, alpha):
-        self.inner = inner
-        self.k = k
-        self.alpha = alpha
+    inner: Optimizer = None
+    k: int = None
+    alpha: float = None
 
     def init(self, params):
         return _LookaheadState(

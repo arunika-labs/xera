@@ -5,14 +5,16 @@ from typing import NamedTuple, Any
 import jax
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
+from ...struct import Struct
 
 
-class Accumulate:
+class Accumulate(Struct):
 
+    steps: int = None
 
-    def __init__(self, steps: int):
-        assert steps >= 1, "Accumulate(steps) needs steps >= 1"
-        self.steps = int(steps)
+    def setup(self):
+        assert self.steps >= 1, "Accumulate(steps) needs steps >= 1"
+        self.steps = int(self.steps)
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _Accumulated(inner, self.steps)
@@ -25,9 +27,8 @@ class _AccumulatedState(NamedTuple):
 
 
 class _Accumulated(Optimizer):
-    def __init__(self, inner, steps):
-        self.inner = inner
-        self.steps = steps
+    inner: Optimizer = None
+    steps: int = None
 
     def init(self, params):
         buf = _tree_map(jnp.zeros_like, params)

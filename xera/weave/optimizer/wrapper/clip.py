@@ -3,22 +3,23 @@
 from __future__ import annotations
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map, _global_norm
+from ...struct import Struct
 
 
-class Clip:
+class Clip(Struct):
 
+    threshold: float = None
 
-    def __init__(self, threshold: float):
-        self.threshold = float(threshold)
+    def setup(self):
+        self.threshold = float(self.threshold)
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _Clipped(inner, self.threshold)
 
 
 class _Clipped(Optimizer):
-    def __init__(self, inner, threshold):
-        self.inner = inner
-        self.threshold = threshold
+    inner: Optimizer = None
+    threshold: float = None
 
     def init(self, params):
         return self.inner.init(params)

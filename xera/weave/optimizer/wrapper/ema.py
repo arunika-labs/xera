@@ -4,14 +4,17 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
+from ...struct import Struct
 
 
-class EMA:
+class EMA(Struct):
 
+    decay: float = 0.999
+    warmup_steps: int = 0
 
-    def __init__(self, decay: float = 0.999, warmup_steps: int = 0):
-        self.decay = float(decay)
-        self.warmup_steps = int(warmup_steps)
+    def setup(self):
+        self.decay = float(self.decay)
+        self.warmup_steps = int(self.warmup_steps)
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _EMAed(inner, self.decay, self.warmup_steps)
@@ -24,10 +27,9 @@ class _EMAedState(NamedTuple):
 
 
 class _EMAed(Optimizer):
-    def __init__(self, inner, decay, warmup_steps):
-        self.inner = inner
-        self.decay = decay
-        self.warmup_steps = warmup_steps
+    inner: Optimizer = None
+    decay: float = None
+    warmup_steps: int = None
 
     def init(self, params):
         return _EMAedState(

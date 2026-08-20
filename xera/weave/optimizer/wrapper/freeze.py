@@ -5,6 +5,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
 from ..partition import Partition
+from ...struct import Struct
 
 
 class _NoOpState(NamedTuple):
@@ -22,11 +23,9 @@ class _NoOp(Optimizer):
         return zero, _NoOpState(step=state.step + 1)
 
 
-class Freeze:
+class Freeze(Struct):
 
-
-    def __init__(self, predicate):
-        self.predicate = predicate
+    predicate: object = None
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return Partition([

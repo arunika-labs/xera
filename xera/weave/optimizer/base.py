@@ -3,6 +3,7 @@
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
+from ..struct import Struct
 
 _tree_map = jax.tree_util.tree_map
 
@@ -19,7 +20,7 @@ def _global_norm(tree):
     return jnp.sqrt(sum(jnp.sum(jnp.square(l)) for l in leaves))
 
 
-class Optimizer:
+class Optimizer(Struct):
 
 
     def init(self, params):

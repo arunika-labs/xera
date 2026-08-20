@@ -28,15 +28,15 @@ class ShampooState(NamedTuple):
 
 class Shampoo(Optimizer):
 
-    def __init__(self, lr, momentum=0.9, beta=1.0, eps=1e-6,
-                 precondition_every=1, weight_decay=0.0):
+    lr: float = None
+    momentum: float = 0.9
+    beta: float = 1.0
+    eps: float = 1e-6
+    precondition_every: int = 1
+    weight_decay: float = 0.0
 
-        self.lr = lr
-        self.momentum = momentum
-        self.beta = beta
-        self.eps = eps
-        self.precondition_every = int(precondition_every)
-        self.weight_decay = weight_decay
+    def setup(self):
+        self.precondition_every = int(self.precondition_every)
 
     def init(self, params):
         def _init_leaf(p):

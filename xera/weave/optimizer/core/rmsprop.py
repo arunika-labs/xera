@@ -15,13 +15,11 @@ class RMSpropState(NamedTuple):
 
 class RMSprop(Optimizer):
 
-
-    def __init__(self, lr, decay=0.9, eps=1e-8, momentum=0.0, centered=False):
-        self.lr = lr
-        self.decay = decay
-        self.eps = eps
-        self.momentum = momentum
-        self.centered = centered
+    lr: float = None
+    decay: float = 0.9
+    eps: float = 1e-8
+    momentum: float = 0.0
+    centered: bool = False
 
     def init(self, params):
         v = _tree_map(jnp.zeros_like, params)

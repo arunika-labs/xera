@@ -28,10 +28,11 @@ jax.tree_util.register_pytree_node(
 
 class Partition(Optimizer):
 
+    rules: Sequence[Tuple[Predicate, Optimizer]] = None
 
-    def __init__(self, rules: Sequence[Tuple[Predicate, Optimizer]]):
-        assert len(rules) > 0, "Partition needs at least one (predicate, optimizer) rule"
-        self.rules = list(rules)
+    def setup(self):
+        assert len(self.rules) > 0, "Partition needs at least one (predicate, optimizer) rule"
+        self.rules = list(self.rules)
 
     def _assign(self, params):
         path_leaves, treedef = jax.tree_util.tree_flatten_with_path(params)

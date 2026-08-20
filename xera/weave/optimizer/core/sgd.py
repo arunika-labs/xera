@@ -13,11 +13,10 @@ class SGDMomentumState(NamedTuple):
 
 class SGDMomentum(Optimizer):
 
-    def __init__(self, lr, momentum=0.9, nesterov=False, weight_decay=0.0):
-        self.lr = lr
-        self.momentum = momentum
-        self.nesterov = nesterov
-        self.weight_decay = weight_decay
+    lr: float = None
+    momentum: float = 0.9
+    nesterov: bool = False
+    weight_decay: float = 0.0
 
     def init(self, params):
         m = _tree_map(jnp.zeros_like, params)

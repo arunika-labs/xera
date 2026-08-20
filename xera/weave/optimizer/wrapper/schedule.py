@@ -4,13 +4,12 @@ from __future__ import annotations
 from typing import NamedTuple, Any, Callable
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
+from ...struct import Struct
 
 
-class Schedule:
+class Schedule(Struct):
 
-
-    def __init__(self, fn: Callable[[jnp.ndarray], jnp.ndarray]):
-        self.fn = fn
+    fn: Callable[[jnp.ndarray], jnp.ndarray] = None
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _Scheduled(inner, self.fn)
@@ -22,9 +21,8 @@ class _ScheduledState(NamedTuple):
 
 
 class _Scheduled(Optimizer):
-    def __init__(self, inner, fn):
-        self.inner = inner
-        self.fn = fn
+    inner: Optimizer = None
+    fn: Callable = None
 
     def init(self, params):
         return _ScheduledState(

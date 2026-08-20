@@ -47,11 +47,56 @@ Example:
     ...         lambda: None,
     ...     )
     ...     return (model, opt_state), loss
+
+Stopping training from a hook (see `xera.weave.hook.Hook`) uses the same
+ordered-host-effect primitive, pushed one step further: a hook's
+`on_step_end` can simply `raise XeraHook(reason)` (or call the
+`Callback.stop(reason)` shortcut) from inside the `io_callback` that
+`Callback.run_hooks` fires. JAX gives no first-class "stop this scan"
+primitive, but a plain Python exception raised inside an `io_callback`
+propagates out through it and out through the enclosing
+`jax.lax.scan`/`jit` call exactly like it would out of any other Python
+function call -- so `raise` is, in effect, JAX's stop mechanism here.
+`XeraHook` (see `xera.errors`) exists specifically to mark this as a
+*deliberate* stop rather than a bug: it is not a subclass of
+`XeraError`, xera's ordinary-error base, precisely so the two can never
+be accidentally caught by the same `except` clause. Two things are
+worth knowing about the raise path:
+
+- JAX re-wraps the exception (typically as a `jax.errors.JaxRuntimeError`)
+  by the time it reaches your `except` block, so `except XeraHook`
+  will *not* match. Catch the wrapped type and use
+  `Callback.is_training_stopped(exc)` to check whether it was an
+  `XeraHook` underneath, rather than parsing the traceback text
+  yourself.
+- The raise aborts the whole `scan`/`jit` call -- there's no "skip this
+  step and continue" from here. Log whatever you need *before* raising
+  (typically inside the same hook, via `Metrics.log`/`Callback.log`), not
+  after, since after may never run.
+
+Example:
+    >>> from xera.weave import Callback, Hook
+    >>>
+    >>> class StopAtStep(Hook):
+    ...     at: int = 100
+    ...     def on_step_end(self, step, logs):
+    ...         if step >= self.at:
+    ...             Metrics.log(step=step, stopped=1.0)  # log first
+    ...             Callback.stop(f"StopAtStep: reached step {step}")
+    >>>
+    >>> try:
+    ...     final, ys = loop.run(step_fn, init_carry)
+    ... except jax.errors.JaxRuntimeError as e:
+    ...     if Callback.is_training_stopped(e):
+    ...         print("training stopped early:", e)
+    ...     else:
+    ...         raise
 """
 
 from __future__ import annotations
 from jax.experimental import io_callback
 from .metrics import Metrics, _default_emit
+from ..errors import XeraHook
 
 
 class Callback:
@@ -215,6 +260,105 @@ class Callback:
         io_callback(_write, None, step, module, ordered=True)
 
     @classmethod
+    def stop(cls, reason="XeraHook"):
+        """
+        Raise `XeraHook` from the host to deliberately abort training.
+
+        A thin, explicit `raise` -- provided as a named method mainly so
+        call sites read as "stop training" rather than a bare `raise`,
+        and so the exception type lives in one place. Call this from
+        inside a `Hook`'s `on_step_end` (i.e. from code already running
+        on the host inside an `io_callback`), typically *after* writing
+        whatever log entry explains the stop -- once this raises,
+        nothing after it in the same `scan`/`jit` call is guaranteed to
+        run.
+
+        Args:
+            reason: Human-readable explanation, carried on the raised
+                `XeraHook` and visible (wrapped, prefixed with
+                `"XeraHook: "`) in the exception that reaches the
+                caller of the training loop.
+
+        Raises:
+            XeraHook: Always.
+
+        Example:
+            >>> class EarlyStopping(Hook):
+            ...     def on_step_end(self, step, logs):
+            ...         if should_stop:
+            ...             Metrics.log(step=step, early_stopped=1.0)
+            ...             Callback.stop(f"EarlyStopping: no improvement")
+        """
+        raise XeraHook(reason)
+
+    @staticmethod
+    def is_training_stopped(exc):
+        """
+        Check whether a caught exception was an `XeraHook` raised from
+        inside an `io_callback`.
+
+        JAX re-wraps exceptions raised inside `io_callback` (typically as
+        `jax.errors.JaxRuntimeError`), so the exception a caller catches
+        around `loop.run(...)` is not an `XeraHook` instance -- a plain
+        `except XeraHook` will never match. This checks the wrapped
+        exception's message for `XeraHook`'s class name instead, which
+        survives the wrapping (`XeraHook.__init__` always prefixes its
+        message with `"XeraHook: "` for exactly this reason).
+
+        Args:
+            exc: The exception caught around the training loop call.
+
+        Returns:
+            True if `exc` (or its chained cause) originated from an
+            `XeraHook` raised via `Callback.stop`/a `Hook` -- i.e. a
+            deliberate stop, not an ordinary error.
+
+        Example:
+            >>> try:
+            ...     final, ys = loop.run(step_fn, init_carry)
+            ... except jax.errors.JaxRuntimeError as e:
+            ...     if Callback.is_training_stopped(e):
+            ...         print("stopped:", e)
+            ...     else:
+            ...         raise
+        """
+        return "XeraHook" in str(exc)
+
+    @classmethod
+    def run_hooks(cls, step, hooks, **logs):
+        """
+        Run `on_step_end` on a list of stop-condition `Hook`s, in order,
+        via a single ordered `io_callback`.
+
+        Only for `Hook`s (see `xera.weave.hook`) -- history-dependent
+        stop conditions like `EarlyStopping`. Deterministic per-step
+        effects (printing, logging to a file, checkpointing) belong in
+        `Callback.log`/`Callback.call` instead, not here.
+
+        All hooks for a given step run inside one host call, in list
+        order, with concrete (non-traced) `step` and `logs` values -- so
+        a hook's `on_step_end` can do normal Python: compare metrics
+        against its own state, mutate that state
+        (`object.__setattr__(self, ...)`), and call `Callback.stop` to
+        abort training if its condition is met (see the module
+        docstring for how that propagates).
+
+        Args:
+            step: Current step, forwarded to each hook's `on_step_end`.
+            hooks: A list of `Hook` instances, called in order.
+            **logs: Metric values for this step (e.g. `loss=loss`),
+                forwarded as a single `logs` dict to each hook.
+
+        Example:
+            >>> hooks = [EarlyStopping(patience=3), NaNGuard()]
+            >>> Callback.run_hooks(i, hooks, loss=loss, val_loss=val_loss)
+        """
+        def _run(step_, logs_):
+            for hook in hooks:
+                hook.on_step_end(step_, logs_)
+        io_callback(_run, None, step, logs, ordered=True)
+
+    @classmethod
     def save_state(cls, step, state, path_fn):
         """
         Checkpoint a training state (optimizer state, a `Struct`
@@ -243,4 +387,4 @@ class Callback:
         io_callback(_write, None, step, state, ordered=True)
 
 
-__all__ = ["Callback"]
+__all__ = ["Callback", "XeraHook"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from ..base import Optimizer, _tree_map
+from ...struct import Struct
 
 
 def _find_lr(opt):
@@ -16,12 +17,13 @@ def _find_lr(opt):
     return None
 
 
-class WeightDecay:
+class WeightDecay(Struct):
 
+    rate: float = None
+    lr: float = None
 
-    def __init__(self, rate: float, lr: float = None):
-        self.rate = float(rate)
-        self.lr = lr
+    def setup(self):
+        self.rate = float(self.rate)
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         lr = self.lr if self.lr is not None else _find_lr(inner)
@@ -35,10 +37,9 @@ class WeightDecay:
 
 
 class _WeightDecayed(Optimizer):
-    def __init__(self, inner, rate, lr):
-        self.inner = inner
-        self.rate = rate
-        self.lr = lr
+    inner: Optimizer = None
+    rate: float = None
+    lr: float = None
 
     def init(self, params):
         return self.inner.init(params)

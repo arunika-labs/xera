@@ -39,15 +39,15 @@ class MuonCoreState(NamedTuple):
 
 class MuonCore(Optimizer):
 
+    lr: float = None
+    momentum: float = 0.95
+    nesterov: bool = True
+    ns_steps: int = 5
+    weight_decay: float = 0.0
+    clip: bool = True
 
-    def __init__(self, lr, momentum=0.95, nesterov=True, ns_steps=5,
-                 weight_decay=0.0, clip=True):
-        self.lr = lr
-        self.momentum = momentum
-        self.nesterov = nesterov
-        self.ns_steps = ns_steps
-        self.weight_decay = weight_decay
-
+    def setup(self):
+        clip = self.clip
         if clip is True:
             self.clip_threshold = 1.0
         elif clip is False:

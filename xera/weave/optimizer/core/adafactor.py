@@ -24,12 +24,11 @@ _UNUSED = jnp.zeros([1])
 
 class Adafactor(Optimizer):
 
-    def __init__(self, lr, decay=0.8, eps=1e-30, clip_threshold=1.0, weight_decay=0.0):
-        self.lr = lr
-        self.decay = decay
-        self.eps = eps
-        self.clip_threshold = clip_threshold
-        self.weight_decay = weight_decay
+    lr: float = None
+    decay: float = 0.8
+    eps: float = 1e-30
+    clip_threshold: float = 1.0
+    weight_decay: float = 0.0
 
     def _init_leaf(self, p):
         if p.ndim == 2:

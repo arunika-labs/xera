@@ -13,10 +13,9 @@ class AdagradState(NamedTuple):
 
 class Adagrad(Optimizer):
 
-    def __init__(self, lr, eps=1e-8, initial_accumulator=0.0):
-        self.lr = lr
-        self.eps = eps
-        self.initial_accumulator = initial_accumulator
+    lr: float = None
+    eps: float = 1e-8
+    initial_accumulator: float = 0.0
 
     def init(self, params):
         g2 = _tree_map(lambda p: jnp.full_like(p, self.initial_accumulator), params)

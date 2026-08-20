@@ -2,6 +2,7 @@ from . import initializers
 from . import loom
 from . import weave
 from . import serialize
+from . import errors
 
 from importlib.metadata import version, PackageNotFoundError
 
@@ -15,4 +16,5 @@ __all__ = [
     "loom",
     "weave",
     "serialize",
+    "errors",
 ]
