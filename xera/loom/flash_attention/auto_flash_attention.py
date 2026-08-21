@@ -156,9 +156,9 @@ def _flash_attention_splash(
 # Public dispatcher.
 # ---------------------------------------------------------------------------
 
-_VALID_BACKENDS = ("auto", "cudnn", "splash", "xenafl")
+_VALID_BACKENDS = ("cudnn", "splash", "xenafl")
 
-# Default tile sizes xenafl uses when reached via "auto"/vendor-fallback
+# Default tile sizes xenafl uses when reached via auto-dispatch/vendor-fallback
 # (not user-configurable through this entry point -- call
 # `xera.loom.xenafl_attention.xenafl_attention` directly for that).
 _XENAFL_BLOCK_Q = 128
@@ -199,12 +199,13 @@ def auto_flash_attention(
     scale: float | None = None,
     bias: jax.Array | None = None,
     local_window_size: int | tuple[int | None, int | None] | None = None,
-    backend: str = "auto",
+    backend: str | None = None,
 ) -> jax.Array:
     """
     Flash attention with automatic backend selection (AutoFA).
 
-    Picks a flash-attention implementation for the current JAX device:
+    By default (`backend=None`), picks a flash-attention implementation
+    for the current JAX device:
 
         - TPU: Splash Attention (Pallas TPU kernel), if dtype/features are
           supported; falls back to xenafl otherwise.
@@ -235,20 +236,22 @@ def auto_flash_attention(
         causal: If True, apply a causal mask.
         scale: Softmax scale. Defaults to 1/sqrt(head_dim).
         bias: Optional additive attention bias. Only supported by xenafl
-            -- requesting this under "auto" on GPU/TPU routes to xenafl.
+            -- requesting this with `backend=None` on GPU/TPU routes to
+            xenafl.
         local_window_size: Optional local attention window. Only
             supported by xenafl, same as `bias`.
-        backend: One of "auto" (default), "cudnn", "splash", or "xenafl".
-            Use a specific value to force that backend (raises if it's
-            unavailable or doesn't support the requested dtype/features --
-            forcing a backend means "use exactly this, or fail", no
-            fallback).
+        backend: `None` (default) for automatic dispatch -- this function
+            is already "auto", so there's no separate `"auto"` string to
+            pass. Set to `"cudnn"`, `"splash"`, or `"xenafl"` to force
+            that backend (raises if it's unavailable or doesn't support
+            the requested dtype/features -- forcing a backend means "use
+            exactly this, or fail", no fallback).
 
     Returns:
         Output array of shape (batch, num_heads, seq_len, head_dim).
     """
-    if backend not in _VALID_BACKENDS:
-        raise ValueError(f"backend must be one of {_VALID_BACKENDS}, got {backend!r}")
+    if backend is not None and backend not in _VALID_BACKENDS:
+        raise ValueError(f"backend must be None or one of {_VALID_BACKENDS}, got {backend!r}")
 
     platform = jax.devices()[0].platform
 
@@ -269,7 +272,7 @@ def auto_flash_attention(
             q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
         )
 
-    # backend == "auto": dispatch by platform, falling back to xenafl
+    # backend is None: dispatch by platform, falling back to xenafl
     # whenever the vendor backend for that platform can't serve the
     # request. CPU (or anything else) always uses xenafl silently -- it's
     # the only backend there.
