@@ -15,10 +15,14 @@ Layout:
 
     - `auto_flash_attention.py` -- the dispatcher. Picks a backend for
       the current device: Splash on TPU, cuDNN fused attention on GPU
-      (sm_80+), the Triton backend on GPU (sm_70/sm_75, not yet
-      implemented), `xenafl_attention` as the portable fallback
-      everywhere else (or whenever a vendor backend can't serve the
-      request).
+      (sm_80+ by default), the Triton backend on GPU (sm_70/sm_75 by
+      default; not yet implemented), `xenafl_attention` as the
+      portable fallback everywhere else (or whenever a vendor backend
+      can't serve the request). "By default" because this only governs
+      `backend="auto"`'s routing choice -- `xenafl_attention` and
+      `xenafl_triton` are both naive-but-portable by design and work
+      correctly (just not at vendor-kernel speed) on any device/GPU
+      arch when explicitly requested.
     - `xenafl_attention.py` -- the pure-jnp tiled flash attention kernel
       (block tiling + online softmax + custom_vjp) used as that
       fallback, and usable directly on its own.

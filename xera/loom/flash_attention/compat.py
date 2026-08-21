@@ -20,6 +20,17 @@ TODO:
       `xenafl_triton` (once implemented) rather than `xenafl_attention`
       when the device is sm_70/sm_75 specifically.
 
+Important: this capability check only ever affects `backend="auto"`'s
+*default routing choice*. `xenafl_triton` (like `xenafl_attention`) is a
+correct, portable kernel -- Triton compiles it for whatever GPU arch
+it's run on, sm_70 through sm_90+. It is simply slower than cuDNN on
+sm_80+, which is why "auto" prefers cuDNN there. A user who explicitly
+passes `backend="xenafl_triton"` is asking for that specific kernel on
+purpose (e.g. for its composability, or to test/benchmark it) and must
+get it on any GPU, including sm_80+ -- this module's checks must never
+gate or reject an explicitly-forced backend, only influence what
+"auto" picks by default.
+
 This module exists so device-capability logic lives in exactly one
 place, shared by `auto_flash_attention.py` and by tests, rather than
 duplicated/inlined at each call site.
