@@ -1,5 +1,3 @@
-
-
 from .struct import Struct
 from .loop import Loop
 from .loss import Loss
@@ -7,6 +5,7 @@ from .metrics import Metrics
 from .callback import Callback, XeraHook
 from .hook import Hook
 from .early_stopping import EarlyStopping
+from .shard import shard
 from . import optimizer
 from .optimizer import (
     Optimizer,
@@ -42,6 +41,7 @@ __all__ = [
     "XeraHook",
     "Hook",
     "EarlyStopping",
+    "shard",
     "Optimizer",
     "apply_updates",
     "Partition",
