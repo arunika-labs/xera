@@ -56,14 +56,14 @@ def test_auto_flash_attention_exposed_on_loom():
 
 def test_invalid_backend_raises_value_error():
     q, k, v = _make_qkv(1, 2, 8, 8)
-    with pytest.raises(ValueError, match="backend must be one of"):
+    with pytest.raises(ValueError, match="backend must be None or one of"):
         loom.auto_flash_attention(q, k, v, backend="bogus")
 
 
 def test_naive_backend_no_longer_a_valid_option():
     # "naive" used to be a valid backend value; xenafl replaced it.
     q, k, v = _make_qkv(1, 2, 8, 8)
-    with pytest.raises(ValueError, match="backend must be one of"):
+    with pytest.raises(ValueError, match="backend must be None or one of"):
         loom.auto_flash_attention(q, k, v, backend="naive")
 
 
