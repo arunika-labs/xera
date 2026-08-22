@@ -123,11 +123,18 @@ def _forward_single(
     n_k_blocks = _num_blocks(seq_len, block_k)
     n_q_blocks = _num_blocks(seq_len, block_q)
 
+    # Padding is loop-invariant (doesn't depend on the scanned/vmapped block
+    # index), so it's done once here rather than inside the scan body --
+    # relying on XLA to hoist it out on its own is implementation-defined,
+    # not guaranteed.
+    q_padded = jnp.pad(q, ((0, block_q), (0, 0)))
+    k_padded = jnp.pad(k, ((0, block_k), (0, 0)))
+    v_padded = jnp.pad(v, ((0, block_k), (0, 0)))
+    bias_padded = jnp.pad(bias, ((0, block_q), (0, block_k))) if bias is not None else None
+
     def q_block_fn(q_block_idx):
         q_start, q_pos, q_valid = _block_bounds(q_block_idx, block_q, seq_len)
-        q_blk = jax.lax.dynamic_slice_in_dim(
-            jnp.pad(q, ((0, block_q), (0, 0))), q_start, block_q, axis=0
-        )
+        q_blk = jax.lax.dynamic_slice_in_dim(q_padded, q_start, block_q, axis=0)
 
         # Running accumulators for the online-softmax recurrence.
         acc0 = jnp.zeros((block_q, head_dim), dtype=jnp.float32)
@@ -138,20 +145,14 @@ def _forward_single(
             acc, m_prev, l_prev = carry
             k_start, k_pos, k_valid = _block_bounds(k_block_idx, block_k, seq_len)
 
-            k_blk = jax.lax.dynamic_slice_in_dim(
-                jnp.pad(k, ((0, block_k), (0, 0))), k_start, block_k, axis=0
-            )
-            v_blk = jax.lax.dynamic_slice_in_dim(
-                jnp.pad(v, ((0, block_k), (0, 0))), k_start, block_k, axis=0
-            )
+            k_blk = jax.lax.dynamic_slice_in_dim(k_padded, k_start, block_k, axis=0)
+            v_blk = jax.lax.dynamic_slice_in_dim(v_padded, k_start, block_k, axis=0)
 
             scores = jnp.einsum("qd,kd->qk", q_blk, k_blk).astype(jnp.float32) * scale
 
             if bias is not None:
                 bias_blk = jax.lax.dynamic_slice(
-                    jnp.pad(bias, ((0, block_q), (0, block_k))),
-                    (q_start, k_start),
-                    (block_q, block_k),
+                    bias_padded, (q_start, k_start), (block_q, block_k)
                 )
                 scores = scores + bias_blk
 
@@ -199,6 +200,23 @@ def _forward_single(
 # ---------------------------------------------------------------------------
 # Backward: recompute probabilities block-by-block from `lse` (never store
 # them from the forward pass), tiled the same way as forward.
+#
+# Two structurally-symmetric passes, exactly like the original FlashAttention
+# backward: pass 1 (vmap over k-block, scan over q-block) accumulates dK/dV;
+# pass 2 (vmap over q-block, scan over k-block) accumulates dQ. Both passes
+# recompute `p`/`dp`/`ds` from the residuals (q, k, v, bias, lse, delta)
+# rather than reusing tiles from the other pass -- reusing would mean
+# materializing every (q_block, k_block) `ds` tile at once, which is exactly
+# the full (seq_len, seq_len) probability-gradient matrix (just chunked),
+# silently regressing memory to O(seq_len^2). Recomputing costs one extra
+# score matmul (the same trade-off the original paper makes) but keeps both
+# passes O(seq_len) / O(seq_len * block), matching the module's memory claim.
+#
+# The one legitimate exception is `dbias`: its own memory footprint is
+# already O(seq_len^2) by definition (it's a full attention-shaped array),
+# so pass 1 additionally emits its `ds` tiles as scan outputs when a bias is
+# present, and they're reassembled into the dense (seq_len, seq_len)
+# gradient via a single transpose+reshape (no per-tile Python loop).
 # ---------------------------------------------------------------------------
 
 def _backward_single(
@@ -221,54 +239,57 @@ def _backward_single(
     # gradient in one shot.
     delta = jnp.sum(out.astype(jnp.float32) * d_out.astype(jnp.float32), axis=-1)  # (seq_len,)
 
+    # Padding is loop-invariant, so it's done once here rather than inside
+    # scan bodies (see same note in `_forward_single`).
+    q_padded = jnp.pad(q, ((0, block_q), (0, 0)))
+    k_padded = jnp.pad(k, ((0, block_k), (0, 0)))
+    v_padded = jnp.pad(v, ((0, block_k), (0, 0)))
+    d_out_padded = jnp.pad(d_out, ((0, block_q), (0, 0)))
+    lse_padded = jnp.pad(lse, ((0, block_q),))
+    delta_padded = jnp.pad(delta, ((0, block_q),))
+    bias_padded = jnp.pad(bias, ((0, block_q), (0, block_k))) if has_bias else None
+
+    def _recompute_p(q_blk, k_blk, bias_blk, q_pos, k_pos, k_valid, q_valid, lse_blk):
+        """Recomputes the (block_q, block_k) softmax-probability tile from
+        residuals -- shared by both passes so they stay numerically
+        identical."""
+        scores = jnp.einsum("qd,kd->qk", q_blk, k_blk).astype(jnp.float32) * scale
+        if has_bias:
+            scores = scores + bias_blk
+        scores = _apply_masks(
+            scores, q_pos, k_pos, k_valid,
+            causal=causal, window_left=window_left, window_right=window_right,
+        )
+        p = jnp.exp(scores - lse_blk[:, None])
+        p = jnp.where(jnp.isfinite(scores), p, 0.0)
+        p = jnp.where(q_valid[:, None], p, 0.0)
+        return p
+
+    # --- Pass 1: dK, dV (+ ds tiles for dbias, if a bias was given) --------
     def kv_block_fn(k_block_idx):
         k_start, k_pos, k_valid = _block_bounds(k_block_idx, block_k, seq_len)
-        k_blk = jax.lax.dynamic_slice_in_dim(
-            jnp.pad(k, ((0, block_k), (0, 0))), k_start, block_k, axis=0
-        )
-        v_blk = jax.lax.dynamic_slice_in_dim(
-            jnp.pad(v, ((0, block_k), (0, 0))), k_start, block_k, axis=0
-        )
+        k_blk = jax.lax.dynamic_slice_in_dim(k_padded, k_start, block_k, axis=0)
+        v_blk = jax.lax.dynamic_slice_in_dim(v_padded, k_start, block_k, axis=0)
 
         dk0 = jnp.zeros((block_k, head_dim), dtype=jnp.float32)
         dv0 = jnp.zeros((block_k, head_dim), dtype=jnp.float32)
-        dbias0 = jnp.zeros((block_k,), dtype=jnp.float32)  # per-k-position accumulator, unused unless has_bias
 
         def q_block_step(carry, q_block_idx):
-            dk, dv, _ = carry
+            dk, dv = carry
             q_start, q_pos, q_valid = _block_bounds(q_block_idx, block_q, seq_len)
 
-            q_blk = jax.lax.dynamic_slice_in_dim(
-                jnp.pad(q, ((0, block_q), (0, 0))), q_start, block_q, axis=0
-            )
-            d_out_blk = jax.lax.dynamic_slice_in_dim(
-                jnp.pad(d_out, ((0, block_q), (0, 0))), q_start, block_q, axis=0
-            )
-            lse_blk = jax.lax.dynamic_slice_in_dim(
-                jnp.pad(lse, ((0, block_q),)), q_start, block_q, axis=0
-            )
-            delta_blk = jax.lax.dynamic_slice_in_dim(
-                jnp.pad(delta, ((0, block_q),)), q_start, block_q, axis=0
-            )
+            q_blk = jax.lax.dynamic_slice_in_dim(q_padded, q_start, block_q, axis=0)
+            d_out_blk = jax.lax.dynamic_slice_in_dim(d_out_padded, q_start, block_q, axis=0)
+            lse_blk = jax.lax.dynamic_slice_in_dim(lse_padded, q_start, block_q, axis=0)
+            delta_blk = jax.lax.dynamic_slice_in_dim(delta_padded, q_start, block_q, axis=0)
 
-            scores = jnp.einsum("qd,kd->qk", q_blk, k_blk).astype(jnp.float32) * scale
-
+            bias_blk = None
             if has_bias:
                 bias_blk = jax.lax.dynamic_slice(
-                    jnp.pad(bias, ((0, block_q), (0, block_k))),
-                    (q_start, k_start),
-                    (block_q, block_k),
+                    bias_padded, (q_start, k_start), (block_q, block_k)
                 )
-                scores = scores + bias_blk
 
-            scores = _apply_masks(
-                scores, q_pos, k_pos, k_valid,
-                causal=causal, window_left=window_left, window_right=window_right,
-            )
-
-            p = jnp.exp(scores - lse_blk[:, None])              # (block_q, block_k)
-            p = jnp.where(jnp.isfinite(scores), p, 0.0)
-            p = jnp.where(q_valid[:, None], p, 0.0)
+            p = _recompute_p(q_blk, k_blk, bias_blk, q_pos, k_pos, k_valid, q_valid, lse_blk)
 
             d_out_blk_f32 = d_out_blk.astype(jnp.float32)
             dv_contrib = jnp.einsum("qk,qd->kd", p, d_out_blk_f32)
@@ -277,50 +298,68 @@ def _backward_single(
             # d(score)/d(bias) = 1 (bias enters additively, post-scale), so
             # ds_raw is the gradient w.r.t. bias directly. d(score)/d(q@k)
             # picks up the extra `scale` factor from `scores = q@k * scale
-            # + bias`, so dk (and dq, computed separately below) needs the
-            # scaled version.
-            ds_raw = p * (dp - delta_blk[:, None])              # (block_q, block_k), for dbias
-            ds_scaled = ds_raw * scale                           # for dq/dk
+            # + bias`, so dk (and dq, in pass 2) needs the scaled version.
+            ds_raw = p * (dp - delta_blk[:, None])              # (block_q, block_k)
+            ds_scaled = ds_raw * scale
 
             dk_contrib = jnp.einsum("qk,qd->kd", ds_scaled, q_blk.astype(jnp.float32))
-            dbias_contrib = jnp.sum(ds_raw, axis=0) if has_bias else jnp.zeros((block_k,), dtype=jnp.float32)
 
-            return (dk + dk_contrib, dv + dv_contrib, dbias_contrib), (ds_raw, q_pos, q_valid)
+            new_carry = (dk + dk_contrib, dv + dv_contrib)
+            # Only emit the full ds tile when it's actually needed for
+            # dbias -- otherwise pass 1 stays O(seq_len) in its outputs too.
+            ys = ds_raw if has_bias else None
+            return new_carry, ys
 
-        (dk, dv, _), (ds_all, q_pos_all, q_valid_all) = jax.lax.scan(
-            q_block_step, (dk0, dv0, dbias0), jnp.arange(n_q_blocks)
+        (dk, dv), ds_all = jax.lax.scan(
+            q_block_step, (dk0, dv0), jnp.arange(n_q_blocks)
         )
 
         dk = jnp.where(k_valid[:, None], dk, 0.0)
         dv = jnp.where(k_valid[:, None], dv, 0.0)
-        return dk, dv, ds_all, q_pos_all, q_valid_all, k_start, k_valid
+        return dk, dv, ds_all
 
-    dk_blocks, dv_blocks, ds_all_blocks, q_pos_all_blocks, q_valid_all_blocks, k_starts, k_valids = jax.vmap(
-        kv_block_fn
-    )(jnp.arange(n_k_blocks))
+    dk_blocks, dv_blocks, ds_all_blocks = jax.vmap(kv_block_fn)(jnp.arange(n_k_blocks))
 
     dk = dk_blocks.reshape(n_k_blocks * block_k, head_dim)[:seq_len].astype(k.dtype)
     dv = dv_blocks.reshape(n_k_blocks * block_k, head_dim)[:seq_len].astype(v.dtype)
 
-    # dQ: for each q position, sum ds @ k over every k-block that touched it.
-    # ds_all_blocks: (n_k_blocks, n_q_blocks, block_q, block_k)
+    # --- Pass 2: dQ, structurally symmetric to pass 1 -- recomputes `p`/
+    # `dp`/`ds` per (q_block, k_block) tile instead of reusing pass 1's
+    # `ds_all_blocks`, so this pass never holds more than one tile at a
+    # time (O(seq_len) memory, matching the module's docstring). -----------
     def q_block_dq(q_block_idx):
         q_start, q_pos, q_valid = _block_bounds(q_block_idx, block_q, seq_len)
+        q_blk = jax.lax.dynamic_slice_in_dim(q_padded, q_start, block_q, axis=0)
+        d_out_blk = jax.lax.dynamic_slice_in_dim(d_out_padded, q_start, block_q, axis=0)
+        lse_blk = jax.lax.dynamic_slice_in_dim(lse_padded, q_start, block_q, axis=0)
+        delta_blk = jax.lax.dynamic_slice_in_dim(delta_padded, q_start, block_q, axis=0)
+        d_out_blk_f32 = d_out_blk.astype(jnp.float32)
 
-        def per_k_block(k_block_idx):
+        dq0 = jnp.zeros((block_q, head_dim), dtype=jnp.float32)
+
+        def k_block_step(dq, k_block_idx):
             k_start, k_pos, k_valid = _block_bounds(k_block_idx, block_k, seq_len)
-            k_blk = jax.lax.dynamic_slice_in_dim(
-                jnp.pad(k, ((0, block_k), (0, 0))), k_start, block_k, axis=0
-            )
-            # ds_all_blocks holds the unscaled ds (== dbias); dq needs the
-            # scaled version, same as dk above.
-            ds_scaled = ds_all_blocks[k_block_idx, q_block_idx] * scale  # (block_q, block_k)
-            return jnp.einsum("qk,kd->qd", ds_scaled, k_blk.astype(jnp.float32))
+            k_blk = jax.lax.dynamic_slice_in_dim(k_padded, k_start, block_k, axis=0)
+            v_blk = jax.lax.dynamic_slice_in_dim(v_padded, k_start, block_k, axis=0)
 
-        contribs = jax.vmap(per_k_block)(jnp.arange(n_k_blocks))  # (n_k_blocks, block_q, head_dim)
-        dq_blk = jnp.sum(contribs, axis=0)
-        dq_blk = jnp.where(q_valid[:, None], dq_blk, 0.0)
-        return dq_blk
+            bias_blk = None
+            if has_bias:
+                bias_blk = jax.lax.dynamic_slice(
+                    bias_padded, (q_start, k_start), (block_q, block_k)
+                )
+
+            p = _recompute_p(q_blk, k_blk, bias_blk, q_pos, k_pos, k_valid, q_valid, lse_blk)
+
+            dp = jnp.einsum("qd,kd->qk", d_out_blk_f32, v_blk.astype(jnp.float32))
+            ds_raw = p * (dp - delta_blk[:, None])
+            ds_scaled = ds_raw * scale
+
+            dq_contrib = jnp.einsum("qk,kd->qd", ds_scaled, k_blk.astype(jnp.float32))
+            return dq + dq_contrib, None
+
+        dq, _ = jax.lax.scan(k_block_step, dq0, jnp.arange(n_k_blocks))
+        dq = jnp.where(q_valid[:, None], dq, 0.0)
+        return dq
 
     dq_blocks = jax.vmap(q_block_dq)(jnp.arange(n_q_blocks))
     dq = dq_blocks.reshape(n_q_blocks * block_q, head_dim)[:seq_len].astype(q.dtype)
@@ -328,16 +367,16 @@ def _backward_single(
     if has_bias:
         # dbias: for each (q, k) pair, ds is exactly d(bias). Reassemble
         # from the per-(k_block, q_block) ds tiles into a dense
-        # (seq_len, seq_len) gradient -- bias's own memory footprint is
-        # already O(seq_len^2) by definition (it's a full attention-shaped
-        # array), so this doesn't regress the O(seq_len) target for
-        # q/k/v.
-        dbias_full = jnp.zeros((n_q_blocks * block_q, n_k_blocks * block_k), dtype=jnp.float32)
-        for kb in range(n_k_blocks):
-            for qb in range(n_q_blocks):
-                dbias_full = jax.lax.dynamic_update_slice(
-                    dbias_full, ds_all_blocks[kb, qb], (qb * block_q, kb * block_k)
-                )
+        # (seq_len, seq_len) gradient with a single transpose+reshape --
+        # the blocks are non-overlapping and cover the padded grid exactly,
+        # so this needs no per-tile scatter/loop. bias's own memory
+        # footprint is already O(seq_len^2) by definition (it's a full
+        # attention-shaped array), so this doesn't regress the O(seq_len)
+        # target for q/k/v.
+        # ds_all_blocks: (n_k_blocks, n_q_blocks, block_q, block_k)
+        dbias_full = ds_all_blocks.transpose(1, 2, 0, 3).reshape(
+            n_q_blocks * block_q, n_k_blocks * block_k
+        )
         dbias = dbias_full[:seq_len, :seq_len].astype(bias.dtype)
     else:
         dbias = None
