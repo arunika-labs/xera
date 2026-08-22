@@ -4,11 +4,11 @@ A neural network library in JAX, designed for functional programming needs and e
 
 ## Install
 
-#pypi
+pypi
 ```bash
 pip install xera
 ```
-#github
+github
 ```bash
 pip install git+https://github.com/arunika-labs/xera.git
 ```
