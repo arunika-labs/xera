@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from ..base import Optimizer, _tree_map
-from ...struct import Struct
+from ....core import Struct
 
 
 class Cast(Struct):

@@ -5,6 +5,8 @@ This module defines the base classes and utilities used throughout the framework
 - RNGPool: Manages random number generation for stochastic operations
 - Buffer: A wrapper for values that should be treated as leaf nodes in JAX trees
 - Module: Base class for all neural network components
+- Struct: Base class for training-side components (datasets, optimizers,
+  train steps, and other non-parameter pytrees)
 - param: Helper function for parameter initialization
 """
 
@@ -323,6 +325,292 @@ class Module:
         field_names = [f.name for f in dataclasses.fields(self)]
         parts = ", ".join(f"{n}={getattr(self, n)!r}" for n in field_names)
         return f"{type(self).__name__}({parts})"
+
+
+class Struct:
+    """
+    Base class for training-state components in the xera framework.
+
+    Struct is the training-side counterpart to `Module`: same mechanics
+    (dataclass fields, keyed JAX pytree registration, an optional
+    `setup()` hook, optional `self.rng()`), but meant for things that
+    drive or observe training rather than for differentiable model
+    parameters. Use it for datasets, parallel/sharding wrappers,
+    optimizers, train steps, and the top-level training driver -- all
+    as plain `Struct` subclasses, composed by holding each other (and
+    `Module` instances) as fields.
+
+    Example:
+        >>> class Datasets(Struct):
+        ...     x: jnp.ndarray = None
+        ...     y: jnp.ndarray = None
+        ...
+        ...     def augment(self):
+        ...         noise = jax.random.normal(self.rng(), self.x.shape)
+        ...         return self.x + 0.01 * noise
+        ...
+        >>> class Trainer(Struct):
+        ...     model: Module = None
+        ...     data: Datasets = None
+        ...     optimizer: "Optimizer" = None
+        ...
+        ...     def run(self):
+        ...         ...  # user-defined training loop
+        ...
+        >>> trainer = Trainer(model=my_model, data=Datasets(x=xs, y=ys, key=k),
+        ...                    optimizer=Adam(lr=1e-3))
+        >>> trainer.run()
+    """
+
+    def __init_subclass__(cls, **kwargs):
+        """
+        Automatically register subclasses as dataclasses and JAX pytrees.
+
+        Mirrors `Module.__init_subclass__`: converts the subclass into a
+        dataclass and registers it with JAX's keyed pytree utilities so
+        it can flow through `jit`/`grad`/`scan` with readable attribute
+        paths in error messages.
+        """
+        super().__init_subclass__(**kwargs)
+        cls = dataclasses.dataclass(cls, eq=False, repr=False, init=False)
+        jax.tree_util.register_pytree_with_keys(
+            cls,
+            cls._tree_flatten_with_keys,
+            cls._tree_unflatten,
+            cls._tree_flatten,
+        )
+
+    def __new__(cls, *args, **kwargs):
+        """Create a new instance of the struct."""
+        return super().__new__(cls)
+
+    def __init__(self, *args, key=None, **kwargs):
+        """
+        Initialize the struct with field values and an optional random key.
+
+        After field assignment, calls `self.setup()`, and then -- if the
+        subclass defines its own `run()` (i.e. it's not just the no-op
+        base `Struct.run`) -- calls `self.run()` too. This is what lets a
+        `Trainer(Struct)` with a `run()` method start training simply by
+        being instantiated: `Trainer(key=k, ...)`.
+
+        Args:
+            *args: Positional arguments corresponding to struct fields.
+            key: Optional JAX PRNG key. If provided, enables `self.rng()`
+                during `setup()`/`run()` (e.g. for dataset augmentation,
+                or as the training loop's root key).
+            **kwargs: Keyword arguments for struct fields.
+
+        Raises:
+            RuntimeError: If `self.rng()` is called during `setup()`/`run()`
+                but no `key=` was provided.
+        """
+        field_names = [f.name for f in dataclasses.fields(self)]
+        positional = dict(zip(field_names, args))
+        for name, val in {**positional, **kwargs}.items():
+            object.__setattr__(self, name, val)
+
+        if key is not None:
+            object.__setattr__(self, "_rng_pool", RNGPool(key))
+        self.setup()
+
+        if type(self).run is not Struct.run:
+            self.run()
+
+    def setup(self):
+        """
+        Initialize struct fields and nested components.
+
+        Called during `__init__`; override in subclasses to perform any
+        initialization logic. Use `self.rng()` for randomness that needs
+        an explicitly-provided key.
+
+        Example:
+            >>> def setup(self):
+            ...     self.step = 0
+            ...     self.best_loss = float('inf')
+        """
+        pass
+
+    def run(self):
+        """
+        Entry point for structs that represent a runnable process (e.g. a
+        `Trainer`). No-op by default.
+
+        If a subclass overrides `run()`, `__init__` calls it automatically
+        right after `setup()`, so instantiating the struct is enough to
+        start it -- no separate `.run()` call needed:
+
+            >>> class Trainer(Struct):
+            ...     def setup(self):
+            ...         self.model = MyModel(key=self.rng())
+            ...         self.optimizer = Adam(lr=1e-3)
+            ...     def run(self):
+            ...         ...  # define body_fn, call weave.loop(...), etc.
+            ...
+            >>> trainer = Trainer(key=jax.random.PRNGKey(0))  # setup() then run()
+
+        Structs that aren't runnable processes (datasets, loop configs,
+        wrapped optimizer state, ...) simply don't override `run`, and
+        this base no-op is skipped.
+        """
+        pass
+
+    def rng(self, n=None):
+        """
+        Get random keys from the struct's RNG pool.
+
+        Args:
+            n: Optional number of random keys to generate. If None,
+                returns a single key. If specified, returns n keys.
+
+        Returns:
+            A single JAX PRNG key if n is None, or a list of n keys.
+
+        Raises:
+            RuntimeError: If the struct was created without a `key=`
+                parameter. This is intentional: silently falling back to
+                a default key would hide non-determinism, which conflicts
+                with JAX's explicit, functional state model.
+        """
+        pool = getattr(self, "_rng_pool", None)
+        if pool is None:
+            raise RuntimeError(
+                "self.rng() dipanggil tapi Struct ini dibuat tanpa `key=`."
+            )
+        return pool.split(n) if n is not None else pool.next()
+
+    @staticmethod
+    def _is_dynamic(val):
+        """
+        Decide whether a field value belongs in the dynamic pytree part.
+
+        Dynamic: JAX arrays, `Module`/`Struct` instances (and `None`),
+        plus `list`/`dict` values whose elements are all `Module` and/or
+        `Struct` instances (mirrors the list-of-Module exception in
+        `Module._tree_flatten`, extended to `dict` per design decision).
+        Everything else (plain config, callables, hyperparameters) is
+        static.
+        """
+        if isinstance(val, (jnp.ndarray, Module, Struct)) or val is None:
+            return True
+        if isinstance(val, list) and val and all(
+            isinstance(v, (Module, Struct)) for v in val
+        ):
+            return True
+        if isinstance(val, dict) and val and all(
+            isinstance(v, (Module, Struct)) for v in val.values()
+        ):
+            return True
+        return False
+
+    def _tree_flatten(self):
+        """
+        Flatten the struct for JAX pytree operations.
+
+        Separates attributes into dynamic values (arrays, Structs,
+        Modules, and list/dict thereof) that participate in the pytree,
+        and static values (config, hyperparameters, callables) that stay
+        constant across transformations.
+
+        Returns:
+            A tuple (dynamic_vals, aux_data) where:
+                - dynamic_vals: Tuple of dynamic attribute values
+                - aux_data: Auxiliary data for reconstruction (names, static values)
+        """
+        dynamic_names, dynamic_vals = [], []
+        static_names, static_vals = [], []
+        for name, val in self.__dict__.items():
+            if self._is_dynamic(val):
+                dynamic_names.append(name)
+                dynamic_vals.append(val)
+            else:
+                static_names.append(name)
+                static_vals.append(val)
+        aux_data = (tuple(dynamic_names), tuple(static_names), tuple(static_vals))
+        return tuple(dynamic_vals), aux_data
+
+    def _tree_flatten_with_keys(self):
+        """
+        Flatten the struct with attribute keys for JAX pytree operations.
+
+        Same as `_tree_flatten`, but pairs each dynamic value with a
+        `GetAttrKey` so JAX transformations report readable attribute
+        paths (e.g. `trainer.data.x`) in error messages.
+
+        Returns:
+            A tuple (keyed_children, aux_data) where:
+                - keyed_children: List of (key, value) pairs for dynamic attributes
+                - aux_data: Auxiliary data for reconstruction
+        """
+        dynamic_vals, aux_data = self._tree_flatten()
+        dynamic_names = aux_data[0]
+        keyed = [
+            (jax.tree_util.GetAttrKey(name), val)
+            for name, val in zip(dynamic_names, dynamic_vals)
+        ]
+        return keyed, aux_data
+
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        """
+        Reconstruct a struct from flattened representation.
+
+        Inverse of `_tree_flatten`, used by JAX to rebuild the struct
+        after transformations like `jit`, `grad`, or `scan`.
+
+        Args:
+            aux_data: Auxiliary data containing attribute names and static values
+            children: Dynamic attribute values from the flattened representation
+
+        Returns:
+            A reconstructed struct instance.
+        """
+        dynamic_names, static_names, static_vals = aux_data
+        obj = object.__new__(cls)
+        for name, val in zip(dynamic_names, children):
+            object.__setattr__(obj, name, val)
+        for name, val in zip(static_names, static_vals):
+            object.__setattr__(obj, name, val)
+        return obj
+
+    def __repr__(self):
+        """
+        Return a string representation of the struct.
+
+        Returns:
+            A string showing the struct class name and its field values.
+        """
+        field_names = [f.name for f in dataclasses.fields(self)]
+        parts = ", ".join(f"{n}={getattr(self, n)!r}" for n in field_names)
+        return f"{type(self).__name__}({parts})"
+
+    def save_struct(self, model, optimizer, metadata, path):
+        """
+        Save a model, an optimizer (state), and metadata together as one
+        `.sxera` checkpoint file.
+
+        This is a thin wrapper around `xera.serialize.sxera.save_struct` --
+        see that function for the on-disk format. Typically called from
+        inside `run()` (e.g. via a `Callback.io` checkpoint hook):
+
+            >>> self.save_struct(
+            ...     self.model, self.optimizer,
+            ...     metadata={"step": step, "key": self.rng()},
+            ...     path="ckpt.sxera",
+            ... )
+
+        Args:
+            model: The model (`Module` instance) to save.
+            optimizer: The optimizer (state) to save.
+            metadata: A dict (or `Struct`) of everything else needed to
+                resume training -- step counters, RNG keys, config, and
+                the like.
+            path: Destination file path (conventionally ending in `.sxera`).
+        """
+        from .serialize.sxera import save_struct as _save_struct
+
+        _save_struct(model, optimizer, metadata, path)
 
 
 def param(key, init_fn, shape, dtype=jnp.float32):

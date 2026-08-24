@@ -192,7 +192,7 @@ def test_load_state_config_drift_raises_by_default(tmp_path):
     path = str(tmp_path / "state.safetensors")
     save_state(state, path)
 
-    from xera.weave.struct import Struct
+    from xera.core import Struct
 
     class Cfg(Struct):
         x: jnp.ndarray = None
@@ -208,7 +208,7 @@ def test_load_state_config_drift_raises_by_default(tmp_path):
 
 
 def test_load_state_config_drift_allowed_with_release(tmp_path):
-    from xera.weave.struct import Struct
+    from xera.core import Struct
 
     class Cfg(Struct):
         x: jnp.ndarray = None
@@ -225,7 +225,7 @@ def test_load_state_config_drift_allowed_with_release(tmp_path):
 
 
 def test_load_state_no_drift_does_not_raise(tmp_path):
-    from xera.weave.struct import Struct
+    from xera.core import Struct
 
     class Cfg(Struct):
         x: jnp.ndarray = None

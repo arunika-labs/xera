@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
-from ...struct import Struct
+from ....core import Struct
 
 
 class EMA(Struct):

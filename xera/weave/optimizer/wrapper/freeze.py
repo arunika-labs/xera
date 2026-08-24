@@ -5,7 +5,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
 from ..partition import Partition
-from ...struct import Struct
+from ....core import Struct
 
 
 class _NoOpState(NamedTuple):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from ..struct import Struct
+from ...core import Struct
 
 _tree_map = jax.tree_util.tree_map
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map, _global_norm
-from ...struct import Struct
+from ....core import Struct
 
 
 class Clip(Struct):

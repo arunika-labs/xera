@@ -81,9 +81,8 @@ def load_state(template, path, release=False):
 
     Loads leaves from a safetensors file and reconstructs a state using
     `template` to determine the pytree structure (including static
-    config, such as an `Optimizer`'s hyperparameters or a `Loop`'s
-    `type`) -- the same way `load_model` uses an empty model as an
-    architecture template.
+    config, such as an `Optimizer`'s hyperparameters) -- the same way
+    `load_model` uses an empty model as an architecture template.
 
     Args:
         template: A state with the same structure as the saved state
