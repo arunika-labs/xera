@@ -27,71 +27,20 @@ y = model(x)
 
 ## API
 
-Everything lives under four short aliases off the `xera` top level:
+Everything lives under a few short aliases off the `xera` top level:
 
 ```python
-import xera
-
-L = xera.loom       # layers / modules
-W = xera.weave       # training loop, loss, optimizers, metrics, callbacks
-O = xera.weave.optimizer  # optimizer / wrapper
-S = xera.serialize    # save / load (safetensors)
-F = xera.loom.functional  # activation / utility functions
+import xera.loom as L               # layers / modules
+import xera.loom.functional as F    # activations + functional ops
+import xera.weave as W              # training loop, loss, callbacks, sharding
+import xera.weave.optimizer as O    # optimizers
+import xera.serialize as S          # save / load (safetensors)
 ```
 
-### `L` — layers
-
-```python
-import xera.loom as L
-
-model = L.Dense(4, 8, key=jax.random.PRNGKey(0))
-y = model(x)
-```
-
-### `W` — training
-
-```python
-import xera.weave as W
-
-class Trainer(W.Train):
-    def loss_fn(self, pred, target):
-        return W.Loss.L2(pred, target)
-
-    def get_batch(self, i):
-        return x_data[i], y_data[i]
-
-trainer = Trainer(optimizer=W.Adam(lr=1e-3), steps=1000)
-trained_model = trainer(model)
-```
-
-### `F` — functional
-
-```python
-import xera.loom.functional as F
-
-y = F.relu(x)
-y = F.gelu(x)
-y = F.softmax(x, axis=-1)
-```
-
-### `O` — optimizers
-
-```python
-import xera.weave.optimizer as O
-
-opt = O.Adam(lr=1e-3)
-opt_state = opt.init(model)
-updates, opt_state = opt.update(grads, opt_state, model)
-```
-
-### `S` — serialize
-
-```python
-import xera.serialize as S
-
-S.save_model(model, "model.safetensors")
-model = S.load_model(template, "model.safetensors")
-```
+The full API reference — every layer, every training/optimizer/loss
+utility, sharding, checkpointing, and a complete end-to-end training
+example — lives in **[`docs/API.md`](docs/API.md)**. Start there for
+anything beyond this quickstart.
 
 ## License
 
