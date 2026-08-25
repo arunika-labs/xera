@@ -73,10 +73,11 @@ JAX transforms the ordinary way from the outside.
 You'll want it directly as soon as you write a custom layer.
 
 ```python
-from xera.loom import Module, param
+import xera.loom as L
+from xera.loom import param #Optional
 import xera.initializers as init
 
-class MyLinear(Module):
+class MyLinear(L.Module):
     in_features: int
     out_features: int
 
