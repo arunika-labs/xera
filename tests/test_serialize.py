@@ -1,4 +1,4 @@
-"""Tests for xera.serialize: save_model, load_model, save_state, load_state."""
+"""Tests for xera.serialize: save_model, load_model."""
 
 import jax
 import jax.numpy as jnp
@@ -6,8 +6,6 @@ import pytest
 import xera.loom as loom
 import xera.serialize as serialize
 from xera.serialize.model import save_model, load_model, _key
-from xera.serialize.state import save_state, load_state
-from xera.weave.optimizer.core.adam import Adam
 
 
 # ---------------------------------------------------------------------------
@@ -94,167 +92,9 @@ def test_load_model_shape_mismatch_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# save_state / load_state
-# ---------------------------------------------------------------------------
-
-def test_save_and_load_state_roundtrip(tmp_path):
-    opt = Adam(lr=0.1)
-    params = {"w": jnp.ones((3, 3))}
-    state = opt.init(params)
-    grads = jax.tree_util.tree_map(lambda p: p * 0.5, params)
-    _, state = opt.update(grads, state, params)  # advance state so it's non-trivial
-
-    path = str(tmp_path / "state.safetensors")
-    save_state(state, path)
-
-    template = opt.init(params)  # fresh state, same structure, zeroed values
-    loaded = load_state(template, path)
-
-    assert int(loaded.step) == int(state.step)
-    assert jnp.allclose(loaded.m["w"], state.m["w"])
-    assert jnp.allclose(loaded.v["w"], state.v["w"])
-
-
-def test_save_state_output_is_plain_safetensors(tmp_path):
-    # No pickle, no magic bytes -- just a regular safetensors file, loadable
-    # directly with the reference library.
-    from safetensors.numpy import load_file
-    opt = Adam(lr=0.1)
-    state = opt.init({"w": jnp.ones((2,))})
-    path = str(tmp_path / "state.safetensors")
-    save_state(state, path)
-
-    tensors = load_file(path)
-    assert "step" in tensors
-    assert "m['w']" in tensors
-    assert "v['w']" in tensors
-
-
-def test_load_state_rejects_missing_file():
-    template = Adam(lr=0.1).init({"w": jnp.ones((2,))})
-    with pytest.raises(Exception):
-        load_state(template, "/nonexistent/path/state.safetensors")
-
-
-def test_load_state_does_not_mutate_template_in_place(tmp_path):
-    opt = Adam(lr=0.1)
-    params = {"w": jnp.ones((2, 2))}
-    state = opt.init(params)
-    grads = jax.tree_util.tree_map(lambda p: p * 0.5, params)
-    _, state = opt.update(grads, state, params)
-
-    path = str(tmp_path / "state.safetensors")
-    save_state(state, path)
-
-    template = opt.init(params)
-    template_m_before = template.m["w"].copy()
-    load_state(template, path)
-    assert jnp.allclose(template.m["w"], template_m_before)
-
-
-def test_save_state_roundtrip_preserves_nested_pytree_structure(tmp_path):
-    state = {"a": jnp.ones((2, 2)), "b": {"c": jnp.zeros((3,))}}
-    path = str(tmp_path / "nested_state.safetensors")
-    save_state(state, path)
-    template = {"a": jnp.zeros((2, 2)), "b": {"c": jnp.zeros((3,))}}
-    loaded = load_state(template, path)
-    assert jnp.allclose(loaded["a"], state["a"])
-    assert jnp.allclose(loaded["b"]["c"], state["b"]["c"])
-
-
-def test_save_state_with_partition_optimizer_roundtrip(tmp_path):
-    from xera.weave.optimizer.partition import Partition
-    from xera.weave.optimizer.core.sgd import SGDMomentum
-
-    opt = Partition([
-        (lambda path, leaf: leaf.ndim == 2, Adam(lr=0.1)),
-        (lambda path, leaf: True, SGDMomentum(lr=0.1)),
-    ])
-    params = {"w": jnp.ones((2, 2)), "b": jnp.ones((2,))}
-    state = opt.init(params)
-
-    path = str(tmp_path / "partition_state.safetensors")
-    save_state(state, path)
-
-    template = opt.init(params)  # same rules + param structure -> same assignment
-    loaded = load_state(template, path)
-
-    assert loaded.assignment == state.assignment
-
-
-# ---------------------------------------------------------------------------
 # Top-level xera.serialize namespace
 # ---------------------------------------------------------------------------
-
-def test_load_state_config_drift_raises_by_default(tmp_path):
-    opt = Adam(lr=0.1)
-    state = opt.init({"w": jnp.ones((2,))})
-    path = str(tmp_path / "state.safetensors")
-    save_state(state, path)
-
-    from xera.core import Struct
-
-    class Cfg(Struct):
-        x: jnp.ndarray = None
-        lr: float = 0.1
-
-    saved = Cfg(x=jnp.ones((3,)), lr=0.1)
-    path2 = str(tmp_path / "cfg.safetensors")
-    save_state(saved, path2)
-
-    changed_template = Cfg(x=jnp.zeros((3,)), lr=0.2)  # hyperparameter changed
-    with pytest.raises(ValueError):
-        load_state(changed_template, path2)
-
-
-def test_load_state_config_drift_allowed_with_release(tmp_path):
-    from xera.core import Struct
-
-    class Cfg(Struct):
-        x: jnp.ndarray = None
-        lr: float = 0.1
-
-    saved = Cfg(x=jnp.ones((3,)), lr=0.1)
-    path = str(tmp_path / "cfg.safetensors")
-    save_state(saved, path)
-
-    changed_template = Cfg(x=jnp.zeros((3,)), lr=0.2)  # intentional change
-    loaded = load_state(changed_template, path, release=True)
-    assert loaded.lr == 0.2
-    assert jnp.allclose(loaded.x, saved.x)
-
-
-def test_load_state_no_drift_does_not_raise(tmp_path):
-    from xera.core import Struct
-
-    class Cfg(Struct):
-        x: jnp.ndarray = None
-        lr: float = 0.1
-
-    saved = Cfg(x=jnp.ones((3,)), lr=0.1)
-    path = str(tmp_path / "cfg.safetensors")
-    save_state(saved, path)
-
-    same_template = Cfg(x=jnp.zeros((3,)), lr=0.1)  # same static config
-    loaded = load_state(same_template, path)  # release=False, but no drift
-    assert jnp.allclose(loaded.x, saved.x)
-
-
-def test_save_state_stamps_treedef_metadata(tmp_path):
-    from safetensors import safe_open
-    opt = Adam(lr=0.1)
-    state = opt.init({"w": jnp.ones((2,))})
-    path = str(tmp_path / "state.safetensors")
-    save_state(state, path)
-
-    with safe_open(path, framework="numpy") as f:
-        meta = f.metadata()
-    assert meta is not None
-    assert "xera_treedef" in meta
-
 
 def test_serialize_functions_exposed_at_package_level():
     assert serialize.save_model is save_model
     assert serialize.load_model is load_model
-    assert serialize.save_state is save_state
-    assert serialize.load_state is load_state

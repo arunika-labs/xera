@@ -400,3 +400,14 @@ def test_trainer_struct_save_struct_roundtrips_via_load_struct(tmp_path):
     )
     assert jnp.allclose(loaded_model.weight, trainer.final_model.weight)
     assert loaded_meta["step"] == 5
+
+
+# ---------------------------------------------------------------------------
+# xera.weave.Struct -- Struct is exposed via the weave namespace too (W.Struct),
+# not just xera.core.Struct, since it's central to writing a Trainer.
+# ---------------------------------------------------------------------------
+
+def test_struct_is_exposed_via_weave_namespace():
+    import xera.weave as W
+    from xera.core import Struct
+    assert W.Struct is Struct

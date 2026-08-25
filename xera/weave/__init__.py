@@ -1,3 +1,4 @@
+from ..core import Struct
 from .loop import loop
 from .loss import Loss
 from .callback import Callback
@@ -29,6 +30,7 @@ from .optimizer import (
 )
 
 __all__ = [
+    "Struct",
     "loop",
     "Loss",
     "Callback",
