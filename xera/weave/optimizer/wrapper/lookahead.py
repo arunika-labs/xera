@@ -5,7 +5,7 @@ from typing import NamedTuple, Any
 import jax
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
-from ....core import Struct
+from ...struct import Struct
 
 
 class Lookahead(Struct):

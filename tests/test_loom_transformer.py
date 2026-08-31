@@ -1,9 +1,8 @@
-"""Tests for xera.loom.transformer: MLP, TransformerBlock."""
+"""Tests for xera.xl.transformer: MLP, TransformerBlock."""
 
 import jax
 import jax.numpy as jnp
-import xera.loom as loom
-from xera.loom.attention import causal_mask
+import xera.loom as xl
 
 
 # ---------------------------------------------------------------------------
@@ -11,27 +10,27 @@ from xera.loom.attention import causal_mask
 # ---------------------------------------------------------------------------
 
 def test_mlp_forward_shape():
-    mlp = loom.MLP(dim=16, hidden_dim=64, key=jax.random.PRNGKey(0))
+    mlp = xl.MLP(dim=16, hidden_dim=64, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (4, 16))
     out = mlp(x)
     assert out.shape == (4, 16)
 
 
 def test_mlp_batched_sequence_input():
-    mlp = loom.MLP(dim=16, hidden_dim=64, key=jax.random.PRNGKey(0))
+    mlp = xl.MLP(dim=16, hidden_dim=64, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 5, 16))
     out = mlp(x)
     assert out.shape == (2, 5, 16)
 
 
 def test_mlp_layer_shapes():
-    mlp = loom.MLP(dim=16, hidden_dim=64, key=jax.random.PRNGKey(0))
+    mlp = xl.MLP(dim=16, hidden_dim=64, key=jax.random.PRNGKey(0))
     assert mlp.fc1.weight.shape == (16, 64)
     assert mlp.fc2.weight.shape == (64, 16)
 
 
 def test_mlp_deterministic_dropout_is_identity_on_rate_zero():
-    mlp = loom.MLP(dim=8, hidden_dim=16, dropout_rate=0.0, key=jax.random.PRNGKey(0))
+    mlp = xl.MLP(dim=8, hidden_dim=16, dropout_rate=0.0, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 8))
     out1 = mlp(x, deterministic=False)
     out2 = mlp(x, deterministic=False)
@@ -39,7 +38,7 @@ def test_mlp_deterministic_dropout_is_identity_on_rate_zero():
 
 
 def test_mlp_dropout_stochastic_when_active():
-    mlp = loom.MLP(dim=8, hidden_dim=16, dropout_rate=0.5, key=jax.random.PRNGKey(0))
+    mlp = xl.MLP(dim=8, hidden_dim=16, dropout_rate=0.5, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 8))
     out1 = mlp(x, key=jax.random.PRNGKey(2), deterministic=False)
     out2 = mlp(x, key=jax.random.PRNGKey(3), deterministic=False)
@@ -47,7 +46,7 @@ def test_mlp_dropout_stochastic_when_active():
 
 
 def test_mlp_grad_shapes_match_params():
-    mlp = loom.MLP(dim=8, hidden_dim=16, key=jax.random.PRNGKey(0))
+    mlp = xl.MLP(dim=8, hidden_dim=16, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (4, 8))
     grads = jax.grad(lambda m, x: jnp.sum(m(x) ** 2))(mlp, x)
     assert grads.fc1.weight.shape == mlp.fc1.weight.shape
@@ -60,7 +59,7 @@ def test_mlp_uses_gelu_nonlinearity():
     # comparing against a manually composed linear computation would be
     # architecture-specific. Instead, verify negative inputs are not simply
     # zeroed as with ReLU: gelu is smooth and non-zero for small negatives.
-    mlp = loom.MLP(dim=4, hidden_dim=4, key=jax.random.PRNGKey(0))
+    mlp = xl.MLP(dim=4, hidden_dim=4, key=jax.random.PRNGKey(0))
     x = -jnp.ones((1, 4)) * 0.1
     hidden = jax.nn.gelu(mlp.fc1(x))
     assert not jnp.allclose(hidden, jnp.zeros_like(hidden))
@@ -71,18 +70,18 @@ def test_mlp_uses_gelu_nonlinearity():
 # ---------------------------------------------------------------------------
 
 def test_transformer_block_forward_shape():
-    block = loom.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
+    block = xl.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 6, 32))
     out = block(x)
     assert out.shape == (2, 6, 32)
 
 
 def test_transformer_block_has_submodules():
-    block = loom.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
-    assert isinstance(block.attn, loom.MultiHeadAttention)
-    assert isinstance(block.mlp, loom.MLP)
-    assert isinstance(block.ln1, loom.LayerNorm)
-    assert isinstance(block.ln2, loom.LayerNorm)
+    block = xl.TransformerBlock(dim=32, num_heads=4, mlp_hidden_dim=64, key=jax.random.PRNGKey(0))
+    assert isinstance(block.attn, xl.MultiHeadAttention)
+    assert isinstance(block.mlp, xl.MLP)
+    assert isinstance(block.ln1, xl.LayerNorm)
+    assert isinstance(block.ln2, xl.LayerNorm)
 
 
 def test_transformer_block_residual_connection():
@@ -90,7 +89,7 @@ def test_transformer_block_residual_connection():
     # check that block output differs from a pure attn+mlp-without-residual
     # computation, confirming the `x + ...` residual terms are present, by
     # checking block output is not identical to attn(ln1(x)) alone.
-    block = loom.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
+    block = xl.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 4, 16))
     out = block(x)
     attn_only = block.attn(block.ln1(x))
@@ -98,9 +97,9 @@ def test_transformer_block_residual_connection():
 
 
 def test_transformer_block_causal_mask_blocks_future():
-    block = loom.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
+    block = xl.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 16))
-    mask = causal_mask(5)[None, None, :, :]
+    mask = xl.causal_mask(5)[None, None, :, :]
 
     out1 = block(x, mask=mask)[0, 0]
     x_perturbed = x.at[0, 4].add(100.0)
@@ -109,7 +108,7 @@ def test_transformer_block_causal_mask_blocks_future():
 
 
 def test_transformer_block_dropout_splits_keys():
-    block = loom.TransformerBlock(
+    block = xl.TransformerBlock(
         dim=16, num_heads=2, mlp_hidden_dim=32, dropout_rate=0.5, key=jax.random.PRNGKey(0)
     )
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 4, 16))
@@ -119,7 +118,7 @@ def test_transformer_block_dropout_splits_keys():
 
 
 def test_transformer_block_deterministic_reproducible():
-    block = loom.TransformerBlock(
+    block = xl.TransformerBlock(
         dim=16, num_heads=2, mlp_hidden_dim=32, dropout_rate=0.5, key=jax.random.PRNGKey(0)
     )
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 4, 16))
@@ -129,7 +128,7 @@ def test_transformer_block_deterministic_reproducible():
 
 
 def test_transformer_block_grad_shapes_match_params():
-    block = loom.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
+    block = xl.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 4, 16))
     grads = jax.grad(lambda m, x: jnp.sum(m(x) ** 2))(block, x)
     assert grads.attn.q_proj.weight.shape == block.attn.q_proj.weight.shape
@@ -137,7 +136,7 @@ def test_transformer_block_grad_shapes_match_params():
 
 
 def test_transformer_block_jit_compatible():
-    block = loom.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
+    block = xl.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 4, 16))
     fwd = jax.jit(lambda m, x: m(x, deterministic=True))
     out = fwd(block, x)
@@ -149,7 +148,7 @@ def test_transformer_block_stack_composability():
     # sequentially; each maintains independent parameters.
     keys = jax.random.split(jax.random.PRNGKey(0), 3)
     blocks = [
-        loom.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=k) for k in keys
+        xl.TransformerBlock(dim=16, num_heads=2, mlp_hidden_dim=32, key=k) for k in keys
     ]
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 4, 16))
     for block in blocks:

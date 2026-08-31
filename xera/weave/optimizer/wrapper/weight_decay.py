@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from ..base import Optimizer, _tree_map
-from ....core import Struct
+from ...struct import Struct
 
 
 def _find_lr(opt):

@@ -1,4 +1,4 @@
-"""Tests for xera.loom.normalization: LayerNorm, RMSNorm, BatchNorm, GroupNorm,
+"""Tests for xera.xl.normalization: LayerNorm, RMSNorm, BatchNorm, GroupNorm,
 InstanceNorm, LayerScale, GroupNormWithRunningStats.
 
 BatchNorm and GroupNormWithRunningStats use `deterministic` (default True,
@@ -11,11 +11,11 @@ regression tests below.
 import jax
 import jax.numpy as jnp
 import pytest
-import xera.loom as loom
+import xera.loom as xl
 
 
 def test_layer_norm_normalizes_last_axis():
-    ln = loom.LayerNorm(dim=8, key=jax.random.PRNGKey(99))
+    ln = xl.LayerNorm(dim=8, key=jax.random.PRNGKey(99))
     x = jax.random.normal(jax.random.PRNGKey(0), (4, 8)) * 5 + 3
     out = ln(x)
     assert out.shape == x.shape
@@ -24,7 +24,7 @@ def test_layer_norm_normalizes_last_axis():
 
 
 def test_rms_norm_shape_and_no_mean_centering():
-    rms = loom.RMSNorm(dim=8, key=jax.random.PRNGKey(99))
+    rms = xl.RMSNorm(dim=8, key=jax.random.PRNGKey(99))
     x = jax.random.normal(jax.random.PRNGKey(0), (4, 8)) + 10.0  # nonzero mean
     out = rms(x)
     assert out.shape == x.shape
@@ -33,14 +33,14 @@ def test_rms_norm_shape_and_no_mean_centering():
 
 
 def test_group_norm_shape():
-    gn = loom.GroupNorm(num_groups=4, dim=16, key=jax.random.PRNGKey(99))
+    gn = xl.GroupNorm(num_groups=4, dim=16, key=jax.random.PRNGKey(99))
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 8, 8, 16))
     out = gn(x)
     assert out.shape == x.shape
 
 
 def test_instance_norm_normalizes_per_sample_spatial():
-    inorm = loom.InstanceNorm(dim=4, key=jax.random.PRNGKey(99))
+    inorm = xl.InstanceNorm(dim=4, key=jax.random.PRNGKey(99))
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 5, 5, 4)) * 3 + 1
     out = inorm(x)
     assert out.shape == x.shape
@@ -49,7 +49,7 @@ def test_instance_norm_normalizes_per_sample_spatial():
 
 
 def test_layer_scale_scales_by_learnable_init_value():
-    ls = loom.LayerScale(dim=4, init_value=0.5, key=jax.random.PRNGKey(99))
+    ls = xl.LayerScale(dim=4, init_value=0.5, key=jax.random.PRNGKey(99))
     x = jnp.ones((2, 4))
     out = ls(x)
     assert jnp.allclose(out, 0.5)
@@ -63,7 +63,7 @@ def test_layer_scale_scales_by_learnable_init_value():
 def test_batchnorm_default_is_eval_mode():
     # Default (no kwarg) must be eval mode: uses running stats, does not
     # update them. This matches Dropout/MLP/etc's deterministic=True default.
-    bn = loom.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
+    bn = xl.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (8, 16))
     out, new_bn = bn(x)
     assert jnp.allclose(bn.running_mean.value, new_bn.running_mean.value)
@@ -71,7 +71,7 @@ def test_batchnorm_default_is_eval_mode():
 
 
 def test_batchnorm_deterministic_false_updates_running_stats():
-    bn = loom.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
+    bn = xl.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (8, 16))
     _, bn2 = bn(x, deterministic=False)
     assert not jnp.allclose(bn.running_mean.value, bn2.running_mean.value)
@@ -82,14 +82,14 @@ def test_batchnorm_deterministic_false_updates_running_stats():
 def test_batchnorm_no_longer_accepts_training_kwarg():
     # `training=` was the old, inconsistent kwarg name -- confirm it's gone
     # so nobody silently falls back to a stale default.
-    bn = loom.BatchNorm(dim=4, key=jax.random.PRNGKey(0))
+    bn = xl.BatchNorm(dim=4, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 4))
     with pytest.raises(TypeError):
         bn(x, training=True)
 
 
 def test_batchnorm_state_separate_from_params():
-    bn = loom.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
+    bn = xl.BatchNorm(dim=16, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (8, 16))
     _, bn2 = bn(x, deterministic=False)
     assert not jnp.allclose(bn.running_mean.value, bn2.running_mean.value)
@@ -98,7 +98,7 @@ def test_batchnorm_state_separate_from_params():
 
 
 def test_batchnorm_eval_uses_running_stats_not_batch_stats():
-    bn = loom.BatchNorm(dim=4, momentum=0.0, key=jax.random.PRNGKey(0))
+    bn = xl.BatchNorm(dim=4, momentum=0.0, key=jax.random.PRNGKey(0))
     x_train = jax.random.normal(jax.random.PRNGKey(1), (16, 4)) * 3 + 5
     _, bn_trained = bn(x_train, deterministic=False)  # running stats = batch stats (momentum=0)
 
@@ -117,21 +117,21 @@ def test_batchnorm_eval_uses_running_stats_not_batch_stats():
 # ---------------------------------------------------------------------------
 
 def test_group_norm_running_stats_default_is_eval_mode():
-    gn = loom.GroupNormWithRunningStats(num_groups=4, dim=16, key=jax.random.PRNGKey(0))
+    gn = xl.GroupNormWithRunningStats(num_groups=4, dim=16, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (8, 6, 16))
     out, new_gn = gn(x)
     assert jnp.allclose(gn.running_mean.value, new_gn.running_mean.value)
 
 
 def test_group_norm_running_stats_deterministic_false_updates_stats():
-    gn = loom.GroupNormWithRunningStats(num_groups=4, dim=16, key=jax.random.PRNGKey(0))
+    gn = xl.GroupNormWithRunningStats(num_groups=4, dim=16, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(1), (8, 6, 16))
     _, gn2 = gn(x, deterministic=False)
     assert not jnp.allclose(gn.running_mean.value, gn2.running_mean.value)
 
 
 def test_group_norm_running_stats_no_longer_accepts_training_kwarg():
-    gn = loom.GroupNormWithRunningStats(num_groups=2, dim=4, key=jax.random.PRNGKey(0))
+    gn = xl.GroupNormWithRunningStats(num_groups=2, dim=4, key=jax.random.PRNGKey(0))
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 3, 4))
     with pytest.raises(TypeError):
         gn(x, training=True)

@@ -11,8 +11,8 @@ These are efficient alternatives to transformers for long sequence modeling.
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from ..core import Module, param
-from .. import initializers
+from .module import Module, param
+from . import initializers
 from .linear import Dense
 from .conv import Conv
 

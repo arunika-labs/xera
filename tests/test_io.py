@@ -1,11 +1,11 @@
-"""Tests for xera.serialize: save_model, load_model."""
+"""Tests for xera.io: save_model, load_model."""
 
 import jax
 import jax.numpy as jnp
 import pytest
-import xera.loom as loom
-import xera.serialize as serialize
-from xera.serialize.model import save_model, load_model, _key
+import xera.loom as xl
+import xera.io as xio
+from xera.io.model import save_model, load_model, _key
 
 
 # ---------------------------------------------------------------------------
@@ -13,11 +13,11 @@ from xera.serialize.model import save_model, load_model, _key
 # ---------------------------------------------------------------------------
 
 def test_save_and_load_model_roundtrip(tmp_path):
-    model = loom.Dense(4, 8, key=jax.random.PRNGKey(0))
+    model = xl.Dense(4, 8, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
 
-    template = loom.Dense(4, 8, key=jax.random.PRNGKey(1))  # different init
+    template = xl.Dense(4, 8, key=jax.random.PRNGKey(1))  # different init
     loaded = load_model(template, path)
 
     assert jnp.allclose(loaded.weight, model.weight)
@@ -25,8 +25,8 @@ def test_save_and_load_model_roundtrip(tmp_path):
 
 
 def test_load_model_does_not_mutate_template_in_place():
-    model = loom.Dense(4, 8, key=jax.random.PRNGKey(0))
-    template = loom.Dense(4, 8, key=jax.random.PRNGKey(1))
+    model = xl.Dense(4, 8, key=jax.random.PRNGKey(0))
+    template = xl.Dense(4, 8, key=jax.random.PRNGKey(1))
     template_weight_before = template.weight.copy()
 
     import tempfile, os
@@ -41,20 +41,20 @@ def test_load_model_does_not_mutate_template_in_place():
 
 
 def test_save_model_preserves_dtype(tmp_path):
-    model = loom.Dense(3, 3, key=jax.random.PRNGKey(0))
+    model = xl.Dense(3, 3, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
-    template = loom.Dense(3, 3, key=jax.random.PRNGKey(1))
+    template = xl.Dense(3, 3, key=jax.random.PRNGKey(1))
     loaded = load_model(template, path)
     assert loaded.weight.dtype == model.weight.dtype
 
 
 def test_save_model_nested_module_roundtrip(tmp_path):
-    block = loom.TransformerBlock(dim=8, num_heads=2, mlp_hidden_dim=16, key=jax.random.PRNGKey(0))
+    block = xl.TransformerBlock(dim=8, num_heads=2, mlp_hidden_dim=16, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "block.safetensors")
     save_model(block, path)
 
-    template = loom.TransformerBlock(dim=8, num_heads=2, mlp_hidden_dim=16, key=jax.random.PRNGKey(1))
+    template = xl.TransformerBlock(dim=8, num_heads=2, mlp_hidden_dim=16, key=jax.random.PRNGKey(1))
     loaded = load_model(template, path)
 
     assert jnp.allclose(loaded.attn.q_proj.weight, block.attn.q_proj.weight)
@@ -72,7 +72,7 @@ def test_key_helper_strips_leading_dot():
 
 def test_save_model_output_loadable_via_safetensors_directly(tmp_path):
     from safetensors.numpy import load_file
-    model = loom.Dense(2, 3, key=jax.random.PRNGKey(0))
+    model = xl.Dense(2, 3, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
     tensors = load_file(path)
@@ -82,19 +82,19 @@ def test_save_model_output_loadable_via_safetensors_directly(tmp_path):
 
 
 def test_load_model_shape_mismatch_raises(tmp_path):
-    model = loom.Dense(4, 4, key=jax.random.PRNGKey(0))
+    model = xl.Dense(4, 4, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
 
-    wrong_template = loom.Dense(4, 8, key=jax.random.PRNGKey(1))  # mismatched shape
+    wrong_template = xl.Dense(4, 8, key=jax.random.PRNGKey(1))  # mismatched shape
     with pytest.raises(Exception):
         load_model(wrong_template, path)
 
 
 # ---------------------------------------------------------------------------
-# Top-level xera.serialize namespace
+# Top-level xera.io namespace
 # ---------------------------------------------------------------------------
 
-def test_serialize_functions_exposed_at_package_level():
-    assert serialize.save_model is save_model
-    assert serialize.load_model is load_model
+def test_io_functions_exposed_at_package_level():
+    assert xio.save_model is save_model
+    assert xio.load_model is load_model

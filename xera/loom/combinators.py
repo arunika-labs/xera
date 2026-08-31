@@ -8,7 +8,7 @@ sequential composition, residual connections, and custom function wrapping.
 from __future__ import annotations
 import inspect
 from typing import Any
-from ..core import Module
+from .module import Module
 
 
 def _accepted_kwargs(layer, kwargs):

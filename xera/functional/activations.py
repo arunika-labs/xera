@@ -2,12 +2,21 @@
 Functional activation and utility functions.
 
 This module re-exports the standard set of activation functions from
-`jax.nn` so they can be used directly from `xera.loom` without requiring
-a separate `jax.nn` import. No reimplementation is done here — these are
-thin aliases over JAX's own (XLA-fused, well-tested) implementations.
+`jax.nn` so they can be used directly from `xera.functional` without
+requiring a separate `jax.nn` import. No reimplementation is done here
+-- these are thin aliases over JAX's own (XLA-fused, well-tested)
+implementations.
+
+This is one module inside the `xera.functional` package. Unlike this
+one, not everything under `functional/` is a thin alias -- see
+`attention.py` in this same package, which holds an original
+implementation (`auto_flash_attention`) rather than a re-export. The
+package as a whole mirrors `jax.nn`, which is likewise a mix of thin
+aliases (`jax.nn.relu`) and original implementations
+(`jax.nn.dot_product_attention`).
 
 Example:
-    >>> from xera.loom import relu, gelu, silu
+    >>> from xera.functional import relu, gelu, silu
     >>> x = relu(x)
 """
 

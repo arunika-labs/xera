@@ -1,9 +1,9 @@
-"""Tests for xera.initializers: lecun, xavier, kaiming, orthogonal, variance_scaling, etc."""
+"""Tests for xera.loom.initializers: lecun, xavier, kaiming, orthogonal, variance_scaling, etc."""
 
 import jax
 import jax.numpy as jnp
 import pytest
-from xera import initializers as init
+from xera.loom import initializers as init
 
 
 SHAPES_2D = [(8, 16), (16, 8)]
@@ -138,7 +138,7 @@ def test_variance_scaling_unknown_distribution_raises():
 
 def test_fan_in_out_for_conv_like_shape():
     # 4D conv kernel shape: (kh, kw, in_ch, out_ch)
-    from xera.initializers import _fan_in_out
+    from xera.loom.initializers import _fan_in_out
 
     fan_in, fan_out = _fan_in_out((3, 3, 8, 16))
     receptive_field = 3 * 3
@@ -147,7 +147,7 @@ def test_fan_in_out_for_conv_like_shape():
 
 
 def test_fan_in_out_for_1d_shape():
-    from xera.initializers import _fan_in_out
+    from xera.loom.initializers import _fan_in_out
 
     fan_in, fan_out = _fan_in_out((32,))
     assert fan_in == fan_out == 32

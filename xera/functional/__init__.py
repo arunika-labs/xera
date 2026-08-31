@@ -7,8 +7,11 @@ original implementations (`attention.py`, re-exporting
 `auto_flash_attention`) -- same as `jax.nn` mixes `jax.nn.relu` (alias)
 with `jax.nn.dot_product_attention` (original implementation).
 
+This is a top-level package (`xera.functional`), separate from `xera.loom`
+-- layers live in `loom`, plain functional ops live here.
+
 Example:
-    >>> from xera.loom.functional import relu, auto_flash_attention
+    >>> from xera.functional import relu, auto_flash_attention
     >>> x = relu(x)
     >>> out = auto_flash_attention(q, k, v, causal=True)
 """

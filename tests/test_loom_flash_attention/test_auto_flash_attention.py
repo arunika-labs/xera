@@ -1,4 +1,4 @@
-"""Tests for xera.loom.auto_flash_attention: AutoFA backend dispatch.
+"""Tests for xera.functional.auto_flash_attention: AutoFA backend dispatch.
 
 AutoFA supports three backends: cuDNN (GPU), splash attention (TPU), and
 xenafl (`xera.loom.xenafl_attention`) -- a pure-jnp, dtype-/device-/
@@ -18,6 +18,10 @@ Forcing a specific backend (`backend="cudnn"`/`"splash"`/`"xenafl"`)
 never falls back and never prints -- forcing means "use exactly this, or
 raise."
 
+`auto_flash_attention` is the public functional entry point and lives in
+`xera.functional` (separate from `xera.loom`, which holds `Module`
+layers plus the `xenafl_attention` kernel implementation itself).
+
 This environment has no GPU/TPU, so the real cuDNN/splash backend calls
 aren't exercised end-to-end here; the preflight compatibility checks and
 the dispatcher's fallback/print behavior are (via a mocked `jax.devices`
@@ -30,7 +34,8 @@ import unittest.mock as mock
 
 import jax.numpy as jnp
 import pytest
-import xera.loom as loom
+import xera.loom as xl
+import xera.functional as xf
 from xera.loom.flash_attention.auto_flash_attention import (
     _cudnn_compatibility_issue,
     _splash_compatibility_issue,
@@ -49,22 +54,22 @@ def _make_qkv(batch, heads, seq_len, head_dim, dtype=jnp.bfloat16):
 # Public API surface.
 # ---------------------------------------------------------------------------
 
-def test_auto_flash_attention_exposed_on_loom():
-    assert hasattr(loom, "auto_flash_attention")
-    assert hasattr(loom, "xenafl_attention")
+def test_auto_flash_attention_exposed_on_functional():
+    assert hasattr(xf, "auto_flash_attention")
+    assert hasattr(xl, "xenafl_attention")
 
 
 def test_invalid_backend_raises_value_error():
     q, k, v = _make_qkv(1, 2, 8, 8)
     with pytest.raises(ValueError, match="backend must be None or one of"):
-        loom.auto_flash_attention(q, k, v, backend="bogus")
+        xf.auto_flash_attention(q, k, v, backend="bogus")
 
 
 def test_naive_backend_no_longer_a_valid_option():
     # "naive" used to be a valid backend value; xenafl replaced it.
     q, k, v = _make_qkv(1, 2, 8, 8)
     with pytest.raises(ValueError, match="backend must be None or one of"):
-        loom.auto_flash_attention(q, k, v, backend="naive")
+        xf.auto_flash_attention(q, k, v, backend="naive")
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +80,7 @@ def test_auto_on_cpu_uses_xenafl_and_is_correct():
     # This test environment's real platform is CPU. xenafl is the only
     # backend there, so this should just work (no exception).
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
-    out = loom.auto_flash_attention(q, k, v, causal=True)
+    out = xf.auto_flash_attention(q, k, v, causal=True)
     assert out.shape == q.shape
 
 
@@ -85,7 +90,7 @@ def test_auto_on_cpu_prints_nothing():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        loom.auto_flash_attention(q, k, v, causal=True)
+        xf.auto_flash_attention(q, k, v, causal=True)
     assert buf.getvalue() == ""
 
 
@@ -98,39 +103,39 @@ def test_forced_cudnn_backend_raises_without_gpu_support():
     # fall back to xenafl -- forcing means "use exactly this, or fail".
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     with pytest.raises(ValueError, match="cudnn"):
-        loom.auto_flash_attention(q, k, v, backend="cudnn")
+        xf.auto_flash_attention(q, k, v, backend="cudnn")
 
 
 def test_forced_splash_backend_raises_on_unsupported_dtype():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     with pytest.raises(ValueError, match="splash"):
-        loom.auto_flash_attention(q, k, v, backend="splash")
+        xf.auto_flash_attention(q, k, v, backend="splash")
 
 
 def test_forced_cudnn_backend_rejects_bias():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.bfloat16)
     bias = jnp.zeros((1, 2, 8, 8), dtype=jnp.bfloat16)
     with pytest.raises(ValueError, match="bias"):
-        loom.auto_flash_attention(q, k, v, bias=bias, backend="cudnn")
+        xf.auto_flash_attention(q, k, v, bias=bias, backend="cudnn")
 
 
 def test_forced_cudnn_backend_rejects_local_window():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.bfloat16)
     with pytest.raises(ValueError, match="local_window_size"):
-        loom.auto_flash_attention(q, k, v, local_window_size=4, backend="cudnn")
+        xf.auto_flash_attention(q, k, v, local_window_size=4, backend="cudnn")
 
 
 def test_forced_splash_backend_rejects_bias():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.bfloat16)
     bias = jnp.zeros((1, 2, 8, 8), dtype=jnp.bfloat16)
     with pytest.raises(ValueError, match="bias"):
-        loom.auto_flash_attention(q, k, v, bias=bias, backend="splash")
+        xf.auto_flash_attention(q, k, v, bias=bias, backend="splash")
 
 
 def test_forced_splash_backend_rejects_local_window():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.bfloat16)
     with pytest.raises(ValueError, match="local_window_size"):
-        loom.auto_flash_attention(q, k, v, local_window_size=4, backend="splash")
+        xf.auto_flash_attention(q, k, v, local_window_size=4, backend="splash")
 
 
 def test_forced_backend_never_prints_even_when_raising():
@@ -138,13 +143,13 @@ def test_forced_backend_never_prints_even_when_raising():
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         with pytest.raises(ValueError):
-            loom.auto_flash_attention(q, k, v, backend="cudnn")
+            xf.auto_flash_attention(q, k, v, backend="cudnn")
     assert buf.getvalue() == ""
 
 
 def test_forced_xenafl_backend_works_directly():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
-    out = loom.auto_flash_attention(q, k, v, causal=True, backend="xenafl")
+    out = xf.auto_flash_attention(q, k, v, causal=True, backend="xenafl")
     assert out.shape == q.shape
 
 
@@ -152,7 +157,7 @@ def test_forced_xenafl_backend_prints_nothing():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        loom.auto_flash_attention(q, k, v, causal=True, backend="xenafl")
+        xf.auto_flash_attention(q, k, v, causal=True, backend="xenafl")
     assert buf.getvalue() == ""
 
 
@@ -170,7 +175,7 @@ def test_auto_on_simulated_gpu_with_unsupported_dtype_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = loom.auto_flash_attention(q, k, v, causal=True)
+            out = xf.auto_flash_attention(q, k, v, causal=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -190,7 +195,7 @@ def test_auto_on_simulated_gpu_with_bias_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = loom.auto_flash_attention(q, k, v, bias=bias)
+            out = xf.auto_flash_attention(q, k, v, bias=bias)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -207,7 +212,7 @@ def test_auto_on_simulated_tpu_with_unsupported_dtype_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = loom.auto_flash_attention(q, k, v, causal=True)
+            out = xf.auto_flash_attention(q, k, v, causal=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -224,7 +229,7 @@ def test_auto_on_simulated_tpu_with_local_window_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = loom.auto_flash_attention(q, k, v, local_window_size=4)
+            out = xf.auto_flash_attention(q, k, v, local_window_size=4)
 
     assert out.shape == q.shape
     printed = buf.getvalue()

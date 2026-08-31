@@ -10,7 +10,7 @@ networks for spatial dimensionality reduction and feature extraction.
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from ..core import Module
+from .module import Module
 
 
 def _as_tuple(v, n):

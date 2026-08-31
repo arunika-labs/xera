@@ -9,8 +9,8 @@ a linear transformation to input data, optionally followed by a bias addition.
 
 from __future__ import annotations
 import jax.numpy as jnp
-from ..core import Module, param
-from .. import initializers
+from .module import Module, param
+from . import initializers
 
 
 class Dense(Module):

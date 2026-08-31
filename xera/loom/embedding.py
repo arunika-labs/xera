@@ -10,8 +10,8 @@ positional information in transformer models.
 
 from __future__ import annotations
 import jax.numpy as jnp
-from ..core import Module, param
-from .. import initializers
+from .module import Module, param
+from . import initializers
 
 
 class Embedding(Module):

@@ -4,9 +4,9 @@ Flash attention implementations.
 Grouped separately from the rest of `xera.loom` because these are
 kernel/dispatch-level attention implementations (backend selection +
 kernels), not `Module` layers like the rest of the package. The public
-functional entry point lives at `xera.loom.functional.attention`
-(re-exported as `xera.loom.auto_flash_attention`), sitting alongside
-`xera.loom.functional`'s other functions the way
+functional entry point lives at `xera.functional.attention`
+(re-exported as `xera.functional.auto_flash_attention`), sitting
+alongside `xera.functional`'s other functions the way
 `jax.nn.dot_product_attention` sits alongside the rest of `jax.nn` --
 this package is the implementation those re-exports point to, not
 itself the primary import path for users.

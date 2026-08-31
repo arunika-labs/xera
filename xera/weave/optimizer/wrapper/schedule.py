@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import NamedTuple, Any, Callable
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
-from ....core import Struct
+from ...struct import Struct
 
 
 class Schedule(Struct):

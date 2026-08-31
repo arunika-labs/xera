@@ -1,7 +1,5 @@
-from ..core import Struct
-from .loop import loop
+from .struct import Struct
 from .loss import Loss
-from .callback import Callback
 from .shard import shard
 from . import optimizer
 from .optimizer import (
@@ -31,9 +29,7 @@ from .optimizer import (
 
 __all__ = [
     "Struct",
-    "loop",
     "Loss",
-    "Callback",
     "shard",
     "Optimizer",
     "apply_updates",

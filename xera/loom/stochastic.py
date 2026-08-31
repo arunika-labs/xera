@@ -10,7 +10,7 @@ randomly dropping units during training.
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from ..core import Module
+from .module import Module
 
 
 class Dropout(Module):

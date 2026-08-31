@@ -11,8 +11,8 @@ dilated convolutions, and grouped convolutions.
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from ..core import Module, param
-from .. import initializers
+from .module import Module, param
+from . import initializers
 
 
 def _dimension_numbers(ndim: int) -> jax.lax.ConvDimensionNumbers:

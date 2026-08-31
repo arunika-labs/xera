@@ -1,7 +1,7 @@
-from . import initializers
+from . import functional
 from . import loom
 from . import weave
-from . import serialize
+from . import io
 
 from importlib.metadata import version, PackageNotFoundError
 
@@ -11,8 +11,8 @@ except PackageNotFoundError:
     __version__ = "unknown"
 
 __all__ = [
-    "initializers",
+    "functional",
     "loom",
     "weave",
-    "serialize",
+    "io",
 ]

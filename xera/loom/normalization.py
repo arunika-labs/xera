@@ -8,8 +8,8 @@ batch normalization, group normalization, and their variants with running statis
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from ..core import Module, Buffer, param
-from .. import initializers
+from .module import Module, Buffer, param
+from . import initializers
 
 
 class LayerNorm(Module):

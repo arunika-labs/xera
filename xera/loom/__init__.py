@@ -1,4 +1,6 @@
-from ..core import Module, Buffer, RNGPool, param
+from .._rng import RNGPool
+from . import initializers
+from .module import Module, Buffer, param
 from .linear import Dense
 from .conv import Conv, ConvTranspose
 from .pooling import MaxPool, AvgPool, GlobalAvgPool
@@ -18,41 +20,13 @@ from .transformer import MLP, TransformerBlock
 from .recurrent import SSM, SelectiveSSM, MambaBlock
 from .combinators import Sequential, Residual, Lambda
 from .flash_attention import xenafl_attention
-from .functional import (
-    auto_flash_attention,
-    celu,
-    elu,
-    gelu,
-    glu,
-    hard_sigmoid,
-    hard_silu,
-    hard_swish,
-    hard_tanh,
-    leaky_relu,
-    log_sigmoid,
-    log_softmax,
-    logsumexp,
-    mish,
-    one_hot,
-    relu,
-    relu6,
-    selu,
-    sigmoid,
-    silu,
-    soft_sign,
-    softmax,
-    softplus,
-    squareplus,
-    standardize,
-    swish,
-    tanh,
-)
 
 __all__ = [
     "Module",
     "Buffer",
     "RNGPool",
     "param",
+    "initializers",
     "Dense",
     "Conv",
     "ConvTranspose",
@@ -81,32 +55,5 @@ __all__ = [
     "Sequential",
     "Residual",
     "Lambda",
-    "auto_flash_attention",
     "xenafl_attention",
-    "celu",
-    "elu",
-    "gelu",
-    "glu",
-    "hard_sigmoid",
-    "hard_silu",
-    "hard_swish",
-    "hard_tanh",
-    "leaky_relu",
-    "log_sigmoid",
-    "log_softmax",
-    "logsumexp",
-    "mish",
-    "one_hot",
-    "relu",
-    "relu6",
-    "selu",
-    "sigmoid",
-    "silu",
-    "soft_sign",
-    "softmax",
-    "softplus",
-    "squareplus",
-    "standardize",
-    "swish",
-    "tanh",
 ]

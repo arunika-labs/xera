@@ -11,7 +11,7 @@ rotary position embeddings.
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from ..core import Module
+from .module import Module
 from .linear import Dense
 from .stochastic import Dropout
 from .embedding import RotaryEmbedding
