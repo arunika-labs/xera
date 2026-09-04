@@ -13,11 +13,11 @@ from xera.io.model import save_model, load_model, _key
 # ---------------------------------------------------------------------------
 
 def test_save_and_load_model_roundtrip(tmp_path):
-    model = xl.Dense(4, 8, key=jax.random.PRNGKey(0))
+    model = xl.Linear(4, 8, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
 
-    template = xl.Dense(4, 8, key=jax.random.PRNGKey(1))  # different init
+    template = xl.Linear(4, 8, key=jax.random.PRNGKey(1))  # different init
     loaded = load_model(template, path)
 
     assert jnp.allclose(loaded.weight, model.weight)
@@ -25,8 +25,8 @@ def test_save_and_load_model_roundtrip(tmp_path):
 
 
 def test_load_model_does_not_mutate_template_in_place():
-    model = xl.Dense(4, 8, key=jax.random.PRNGKey(0))
-    template = xl.Dense(4, 8, key=jax.random.PRNGKey(1))
+    model = xl.Linear(4, 8, key=jax.random.PRNGKey(0))
+    template = xl.Linear(4, 8, key=jax.random.PRNGKey(1))
     template_weight_before = template.weight.copy()
 
     import tempfile, os
@@ -41,10 +41,10 @@ def test_load_model_does_not_mutate_template_in_place():
 
 
 def test_save_model_preserves_dtype(tmp_path):
-    model = xl.Dense(3, 3, key=jax.random.PRNGKey(0))
+    model = xl.Linear(3, 3, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
-    template = xl.Dense(3, 3, key=jax.random.PRNGKey(1))
+    template = xl.Linear(3, 3, key=jax.random.PRNGKey(1))
     loaded = load_model(template, path)
     assert loaded.weight.dtype == model.weight.dtype
 
@@ -72,7 +72,7 @@ def test_key_helper_strips_leading_dot():
 
 def test_save_model_output_loadable_via_safetensors_directly(tmp_path):
     from safetensors.numpy import load_file
-    model = xl.Dense(2, 3, key=jax.random.PRNGKey(0))
+    model = xl.Linear(2, 3, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
     tensors = load_file(path)
@@ -82,11 +82,11 @@ def test_save_model_output_loadable_via_safetensors_directly(tmp_path):
 
 
 def test_load_model_shape_mismatch_raises(tmp_path):
-    model = xl.Dense(4, 4, key=jax.random.PRNGKey(0))
+    model = xl.Linear(4, 4, key=jax.random.PRNGKey(0))
     path = str(tmp_path / "model.safetensors")
     save_model(model, path)
 
-    wrong_template = xl.Dense(4, 8, key=jax.random.PRNGKey(1))  # mismatched shape
+    wrong_template = xl.Linear(4, 8, key=jax.random.PRNGKey(1))  # mismatched shape
     with pytest.raises(Exception):
         load_model(wrong_template, path)
 

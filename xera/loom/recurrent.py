@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 from .module import Module, param
 from . import initializers
-from .linear import Dense
+from .linear import Linear
 from .conv import Conv
 
 
@@ -161,10 +161,10 @@ class SelectiveSSM(Module):
         # dt_proj, matching the reference implementation's parameter budget
         # (a full d_inner -> d_inner dt projection per layer would be far
         # more parameters than the state itself justifies).
-        self.x_proj = Dense(
+        self.x_proj = Linear(
             self.d_inner, dt_rank + 2 * self.state_dim, use_bias=False, key=self.rng()
         )
-        self.dt_proj = Dense(dt_rank, self.d_inner, key=self.rng())
+        self.dt_proj = Linear(dt_rank, self.d_inner, key=self.rng())
 
     def __call__(self, x):
         """
@@ -237,14 +237,14 @@ class MambaBlock(Module):
         d_inner = self.d_inner if self.d_inner is not None else self.d_model * 2
         self._d_inner = d_inner
 
-        self.in_proj = Dense(self.d_model, d_inner * 2, use_bias=False, key=self.rng())
+        self.in_proj = Linear(self.d_model, d_inner * 2, use_bias=False, key=self.rng())
         self.conv = Conv(
             d_inner, d_inner, kernel_size=(self.conv_kernel,),
             padding=((self.conv_kernel - 1, 0),),  # causal: pad left only
             groups=d_inner, use_bias=True, key=self.rng(),
         )
         self.ssm = SelectiveSSM(d_inner, state_dim=self.state_dim, dt_rank=self.dt_rank, key=self.rng())
-        self.out_proj = Dense(d_inner, self.d_model, use_bias=False, key=self.rng())
+        self.out_proj = Linear(d_inner, self.d_model, use_bias=False, key=self.rng())
 
     def __call__(self, x):
         """

@@ -80,14 +80,14 @@ class Sequential(Module):
     
     Example:
         >>> model = Sequential([
-        ...     Dense(784, 256),
-        ...     Dense(256, 128),
-        ...     Dense(128, 10)
+        ...     Linear(784, 256),
+        ...     Linear(256, 128),
+        ...     Linear(128, 10)
         ... ])
         >>> output = model(input_tensor)
 
         >>> # With stochastic and stateful layers, e.g. during eval:
-        >>> model = Sequential([Dense(64, 64), BatchNorm(dim=64), Dropout(rate=0.1)])
+        >>> model = Sequential([Linear(64, 64), BatchNorm(dim=64), Dropout(rate=0.1)])
         >>> output, new_model = model(input_tensor, deterministic=True)
     """
     
@@ -139,8 +139,8 @@ class Residual(Module):
         inner: The module to wrap with a residual connection.
     
     Example:
-        >>> block = Residual(Dense(256, 256))
-        >>> output = block(input_tensor)  # Applies Dense(x) + x
+        >>> block = Residual(Linear(256, 256))
+        >>> output = block(input_tensor)  # Applies Linear(x) + x
     """
 
     inner: Any

@@ -12,7 +12,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 from .module import Module
-from .linear import Dense
+from .linear import Linear
 from .normalization import LayerNorm
 from .stochastic import Dropout
 from .attention import MultiHeadAttention
@@ -41,8 +41,8 @@ class MLP(Module):
 
     def setup(self):
         """Initialize the feed-forward network layers."""
-        self.fc1 = Dense(self.dim, self.hidden_dim, key=self.rng())
-        self.fc2 = Dense(self.hidden_dim, self.dim, key=self.rng())
+        self.fc1 = Linear(self.dim, self.hidden_dim, key=self.rng())
+        self.fc2 = Linear(self.hidden_dim, self.dim, key=self.rng())
         self.dropout = Dropout(self.dropout_rate, key=self.rng())
 
     def __call__(self, x, *, key=None, deterministic=True):

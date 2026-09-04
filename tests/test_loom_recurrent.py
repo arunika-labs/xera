@@ -164,8 +164,8 @@ def test_mamba_block_has_submodules():
     mamba = xl.MambaBlock(d_model=16, key=jax.random.PRNGKey(0))
     assert isinstance(mamba.conv, xl.Conv)
     assert isinstance(mamba.ssm, xl.SelectiveSSM)
-    assert isinstance(mamba.in_proj, xl.Dense)
-    assert isinstance(mamba.out_proj, xl.Dense)
+    assert isinstance(mamba.in_proj, xl.Linear)
+    assert isinstance(mamba.out_proj, xl.Linear)
 
 
 def test_mamba_block_causal_conv_future_does_not_affect_past():

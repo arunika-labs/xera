@@ -31,8 +31,8 @@ def test_params_pytree_leaves():
     # native pytree flattening already does) -- this is the replacement:
     # inspect params via jax.tree_util directly, same route `xera.io`
     # and `grad` already use.
-    dense = xl.Dense(4, 8, key=jax.random.PRNGKey(0))
-    leaves_with_path, _ = jax.tree_util.tree_flatten_with_path(dense)
+    linear = xl.Linear(4, 8, key=jax.random.PRNGKey(0))
+    leaves_with_path, _ = jax.tree_util.tree_flatten_with_path(linear)
     names = {jax.tree_util.keystr(p) for p, _ in leaves_with_path}
     assert names == {".weight", ".bias"}
     shapes = {jax.tree_util.keystr(p): leaf.shape for p, leaf in leaves_with_path}
@@ -46,8 +46,8 @@ def test_custom_module_with_loom():
         out_features: int
 
         def setup(self):
-            self.fc1 = xl.Dense(self.in_features, self.hidden, key=self.rng())
-            self.fc2 = xl.Dense(self.hidden, self.out_features, key=self.rng())
+            self.fc1 = xl.Linear(self.in_features, self.hidden, key=self.rng())
+            self.fc2 = xl.Linear(self.hidden, self.out_features, key=self.rng())
 
         def __call__(self, x):
             return self.fc2(jax.nn.relu(self.fc1(x)))

@@ -13,7 +13,7 @@ from .module import Module, param
 from . import initializers
 
 
-class Dense(Module):
+class Linear(Module):
     """
     Standard dense (fully-connected) layer.
     
@@ -27,7 +27,7 @@ class Dense(Module):
         use_bias: Whether to add a bias term (default: True).
     
     Example:
-        >>> layer = Dense(in_features=128, out_features=64)
+        >>> layer = Linear(in_features=128, out_features=64)
         >>> output = layer(input_tensor)  # shape: (..., 64)
     """
     
@@ -62,4 +62,4 @@ class Dense(Module):
         return y
 
 
-__all__ = ["Dense"]
+__all__ = ["Linear"]

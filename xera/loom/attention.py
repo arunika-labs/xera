@@ -12,7 +12,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 from .module import Module
-from .linear import Dense
+from .linear import Linear
 from .stochastic import Dropout
 from .embedding import RotaryEmbedding
 
@@ -65,10 +65,10 @@ class MultiHeadAttention(Module):
         assert self.dim % self.num_heads == 0, "dim must be divisible by num_heads"
         self.head_dim = self.dim // self.num_heads
         
-        self.q_proj = Dense(self.dim, self.dim, key=self.rng())
-        self.k_proj = Dense(self.dim, self.dim, key=self.rng())
-        self.v_proj = Dense(self.dim, self.dim, key=self.rng())
-        self.out_proj = Dense(self.dim, self.dim, key=self.rng())
+        self.q_proj = Linear(self.dim, self.dim, key=self.rng())
+        self.k_proj = Linear(self.dim, self.dim, key=self.rng())
+        self.v_proj = Linear(self.dim, self.dim, key=self.rng())
+        self.out_proj = Linear(self.dim, self.dim, key=self.rng())
         self.dropout = Dropout(self.dropout_rate, key=self.rng())
         if self.use_rope:
             self.rope = RotaryEmbedding(self.head_dim, self.rope_base)
@@ -145,10 +145,10 @@ class GroupedQueryAttention(Module):
         self.head_dim = self.dim // self.num_heads
         kv_dim = self.head_dim * self.num_kv_heads
 
-        self.q_proj = Dense(self.dim, self.dim, key=self.rng())
-        self.k_proj = Dense(self.dim, kv_dim, key=self.rng())
-        self.v_proj = Dense(self.dim, kv_dim, key=self.rng())
-        self.out_proj = Dense(self.dim, self.dim, key=self.rng())
+        self.q_proj = Linear(self.dim, self.dim, key=self.rng())
+        self.k_proj = Linear(self.dim, kv_dim, key=self.rng())
+        self.v_proj = Linear(self.dim, kv_dim, key=self.rng())
+        self.out_proj = Linear(self.dim, self.dim, key=self.rng())
         self.dropout = Dropout(self.dropout_rate, key=self.rng())
         if self.use_rope:
             self.rope = RotaryEmbedding(self.head_dim, self.rope_base)
@@ -214,10 +214,10 @@ class SelfAttention(Module):
 
     def setup(self):
         """Initialize the attention projections."""
-        self.q_proj = Dense(self.dim, self.dim, key=self.rng())
-        self.k_proj = Dense(self.dim, self.dim, key=self.rng())
-        self.v_proj = Dense(self.dim, self.dim, key=self.rng())
-        self.out_proj = Dense(self.dim, self.dim, key=self.rng())
+        self.q_proj = Linear(self.dim, self.dim, key=self.rng())
+        self.k_proj = Linear(self.dim, self.dim, key=self.rng())
+        self.v_proj = Linear(self.dim, self.dim, key=self.rng())
+        self.out_proj = Linear(self.dim, self.dim, key=self.rng())
         self.dropout = Dropout(self.dropout_rate, key=self.rng())
 
     def __call__(self, x, *, context=None, mask=None, key=None, deterministic=True):

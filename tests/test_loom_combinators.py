@@ -21,8 +21,8 @@ import xera.loom as xl
 
 def test_sequential_forward_shape():
     model = xl.Sequential([
-        xl.Dense(4, 8, key=jax.random.PRNGKey(0)),
-        xl.Dense(8, 2, key=jax.random.PRNGKey(1)),
+        xl.Linear(4, 8, key=jax.random.PRNGKey(0)),
+        xl.Linear(8, 2, key=jax.random.PRNGKey(1)),
     ])
     x = jax.random.normal(jax.random.PRNGKey(2), (3, 4))
     out = model(x)
@@ -30,9 +30,9 @@ def test_sequential_forward_shape():
 
 
 def test_sequential_applies_layers_in_order():
-    # Dense with zero weight/bias except an offset makes ordering checkable
-    d1 = xl.Dense(2, 2, key=jax.random.PRNGKey(0))
-    d2 = xl.Dense(2, 2, key=jax.random.PRNGKey(1))
+    # Linear with zero weight/bias except an offset makes ordering checkable
+    d1 = xl.Linear(2, 2, key=jax.random.PRNGKey(0))
+    d2 = xl.Linear(2, 2, key=jax.random.PRNGKey(1))
     model = xl.Sequential([d1, d2])
     x = jax.random.normal(jax.random.PRNGKey(2), (1, 2))
     assert jnp.allclose(model(x), d2(d1(x)))
@@ -44,7 +44,7 @@ def test_sequential_applies_layers_in_order():
 
 def test_sequential_forwards_deterministic_and_key_to_dropout():
     model = xl.Sequential([
-        xl.Dense(4, 4, key=jax.random.PRNGKey(0)),
+        xl.Linear(4, 4, key=jax.random.PRNGKey(0)),
         xl.Dropout(rate=0.9),
     ])
     x = jnp.ones((100, 4))
@@ -59,9 +59,9 @@ def test_sequential_forwards_deterministic_and_key_to_dropout():
 
 
 def test_sequential_dense_only_ignores_unrelated_kwargs():
-    # Dense's __call__ doesn't take `deterministic` -- Sequential must not
+    # Linear's __call__ doesn't take `deterministic` -- Sequential must not
     # error out just because the kwarg was passed for other layers.
-    model = xl.Sequential([xl.Dense(4, 4, key=jax.random.PRNGKey(0))])
+    model = xl.Sequential([xl.Linear(4, 4, key=jax.random.PRNGKey(0))])
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 4))
     out = model(x, deterministic=True, key=jax.random.PRNGKey(2))
     assert out.shape == (2, 4)
@@ -111,10 +111,10 @@ def test_sequential_deterministic_false_updates_batchnorm_running_stats():
 
 
 def test_sequential_mixed_dense_batchnorm_dropout_eval_mode():
-    # A realistic stack: Dense -> BatchNorm -> Dropout, all toggled to eval
+    # A realistic stack: Linear -> BatchNorm -> Dropout, all toggled to eval
     # via a single deterministic=True kwarg, exactly like the bug report.
     model = xl.Sequential([
-        xl.Dense(4, 4, key=jax.random.PRNGKey(0)),
+        xl.Linear(4, 4, key=jax.random.PRNGKey(0)),
         xl.BatchNorm(dim=4, key=jax.random.PRNGKey(1)),
         xl.Dropout(rate=0.5),
     ])
@@ -129,7 +129,7 @@ def test_sequential_mixed_dense_batchnorm_dropout_eval_mode():
 
 def test_sequential_mixed_dense_batchnorm_dropout_train_mode():
     model = xl.Sequential([
-        xl.Dense(4, 4, key=jax.random.PRNGKey(0)),
+        xl.Linear(4, 4, key=jax.random.PRNGKey(0)),
         xl.BatchNorm(dim=4, key=jax.random.PRNGKey(1)),
         xl.Dropout(rate=0.5),
     ])
@@ -146,9 +146,9 @@ def test_sequential_mixed_dense_batchnorm_dropout_train_mode():
 def test_sequential_without_stateful_layers_returns_plain_output():
     # No BatchNorm-like layer in the stack -> Sequential should return just
     # the tensor, not a (output, new_self) tuple, to stay backward
-    # compatible with plain Dense-only stacks.
+    # compatible with plain Linear-only stacks.
     model = xl.Sequential([
-        xl.Dense(4, 4, key=jax.random.PRNGKey(0)),
+        xl.Linear(4, 4, key=jax.random.PRNGKey(0)),
         xl.Dropout(rate=0.0),
     ])
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 4))
@@ -161,7 +161,7 @@ def test_sequential_without_stateful_layers_returns_plain_output():
 # ---------------------------------------------------------------------------
 
 def test_residual_adds_input_to_inner_output():
-    inner = xl.Dense(4, 4, key=jax.random.PRNGKey(0))
+    inner = xl.Linear(4, 4, key=jax.random.PRNGKey(0))
     block = xl.Residual(inner)
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 4))
     out = block(x)
@@ -212,7 +212,7 @@ def test_lambda_ignores_extra_kwargs():
 
 def test_sequential_with_lambda_and_dense():
     model = xl.Sequential([
-        xl.Dense(4, 4, key=jax.random.PRNGKey(0)),
+        xl.Linear(4, 4, key=jax.random.PRNGKey(0)),
         xl.Lambda(lambda x: jax.nn.relu(x)),
     ])
     x = jax.random.normal(jax.random.PRNGKey(1), (2, 4))

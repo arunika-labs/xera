@@ -1,7 +1,7 @@
 from .._rng import RNGPool
 from . import initializers
 from .module import Module, Buffer, param
-from .linear import Dense
+from .linear import Linear
 from .conv import Conv, ConvTranspose
 from .pooling import MaxPool, AvgPool, GlobalAvgPool
 from .embedding import Embedding, RotaryEmbedding
@@ -27,7 +27,7 @@ __all__ = [
     "RNGPool",
     "param",
     "initializers",
-    "Dense",
+    "Linear",
     "Conv",
     "ConvTranspose",
     "MaxPool",

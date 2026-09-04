@@ -20,7 +20,7 @@ import jax
 import xera.loom as L
 import jax.numpy as jnp
 
-model = L.Dense(4, 8, key=jax.random.PRNGKey(0))
+model = L.Linear(4, 8, key=jax.random.PRNGKey(0))
 x = jnp.ones((2, 4))
 y = model(x)
 ```
