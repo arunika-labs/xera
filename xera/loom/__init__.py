@@ -19,7 +19,7 @@ from .attention import MultiHeadAttention, GroupedQueryAttention, SelfAttention,
 from .transformer import MLP, TransformerBlock
 from .recurrent import SSM, SelectiveSSM, MambaBlock
 from .combinators import Sequential, Residual, Lambda
-from .flash_attention import xenafl_attention
+from .._kernel.flash_attention import xenafl_attention
 
 __all__ = [
     "Module",

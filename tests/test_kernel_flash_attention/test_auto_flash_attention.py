@@ -36,7 +36,7 @@ import jax.numpy as jnp
 import pytest
 import xera.loom as xl
 import xera.functional as xf
-from xera.loom.flash_attention.auto_flash_attention import (
+from xera._kernel.flash_attention.auto_flash_attention import (
     _cudnn_compatibility_issue,
     _splash_compatibility_issue,
 )
