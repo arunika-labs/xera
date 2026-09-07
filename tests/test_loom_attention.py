@@ -36,6 +36,81 @@ def test_causal_mask_future_positions_blocked():
 
 
 # ---------------------------------------------------------------------------
+# alibi_slopes / alibi_bias
+# ---------------------------------------------------------------------------
+
+def test_alibi_slopes_shape_and_dtype():
+    slopes = xl.alibi_slopes(8)
+    assert slopes.shape == (8,)
+    assert slopes.dtype == jnp.float32
+
+
+def test_alibi_slopes_power_of_2_matches_paper_geometric_sequence():
+    # For 8 heads, Press et al. 2021 give 1/2, 1/4, ..., 1/256.
+    slopes = xl.alibi_slopes(8)
+    expected = jnp.array([2.0 ** -(i + 1) for i in range(8)])
+    assert jnp.allclose(slopes, expected, atol=1e-6)
+
+
+def test_alibi_slopes_decreasing():
+    slopes = xl.alibi_slopes(8)
+    assert bool(jnp.all(slopes[:-1] > slopes[1:]))
+
+
+def test_alibi_slopes_non_power_of_2_head_count_still_works():
+    # num_heads not a power of 2 exercises the interleaving fallback path.
+    slopes = xl.alibi_slopes(6)
+    assert slopes.shape == (6,)
+    assert bool(jnp.all(slopes > 0))
+
+
+def test_alibi_bias_shape_self_attention():
+    bias = xl.alibi_bias(4, 5)
+    assert bias.shape == (4, 5, 5)
+
+
+def test_alibi_bias_shape_cross_attention():
+    bias = xl.alibi_bias(4, 5, 7)
+    assert bias.shape == (4, 5, 7)
+
+
+def test_alibi_bias_diagonal_is_zero():
+    # Distance 0 (query attending to itself) must carry no penalty.
+    bias = xl.alibi_bias(4, 6)
+    diag = jnp.diagonal(bias, axis1=-2, axis2=-1)
+    assert jnp.allclose(diag, 0.0)
+
+
+def test_alibi_bias_is_non_positive():
+    # ALiBi only ever penalizes (or leaves unchanged); it never rewards.
+    bias = xl.alibi_bias(4, 6)
+    assert bool(jnp.all(bias <= 0.0))
+
+
+def test_alibi_bias_farther_positions_penalized_more():
+    bias = xl.alibi_bias(1, 5)[0]  # single head for a simple monotonicity check
+    # Row 0: penalty should grow (more negative) with distance from query 0.
+    row0 = bias[0]
+    assert bool(jnp.all(row0[:-1] >= row0[1:]))
+
+
+def test_alibi_bias_symmetric_for_self_attention():
+    # |i - j| is symmetric, so the bias matrix should be too.
+    bias = xl.alibi_bias(3, 6)
+    assert jnp.allclose(bias, jnp.swapaxes(bias, -2, -1))
+
+
+def test_alibi_bias_heads_scaled_by_their_slopes():
+    bias = xl.alibi_bias(4, 5)
+    slopes = xl.alibi_slopes(4)
+    # bias[h] should equal -slopes[h] * |i-j|; check the ratio between two
+    # heads at a fixed off-diagonal entry matches the ratio of their slopes.
+    ratio_bias = bias[0, 0, 1] / bias[1, 0, 1]
+    ratio_slopes = slopes[0] / slopes[1]
+    assert jnp.allclose(ratio_bias, ratio_slopes, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
 # MultiHeadAttention
 # ---------------------------------------------------------------------------
 
@@ -89,6 +164,44 @@ def test_mha_rope_changes_output():
     out_norope = attn_norope(x)
     out_rope = attn_rope(x)
     assert not jnp.allclose(out_norope, out_rope, atol=1e-4)
+
+
+def test_mha_alibi_changes_output():
+    attn_plain = xl.MultiHeadAttention(dim=16, num_heads=2, key=jax.random.PRNGKey(0))
+    attn_alibi = xl.MultiHeadAttention(dim=16, num_heads=2, use_alibi=True, key=jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 16))
+    out_plain = attn_plain(x)
+    out_alibi = attn_alibi(x)
+    assert not jnp.allclose(out_plain, out_alibi, atol=1e-4)
+
+
+def test_mha_alibi_causal_mask_blocks_future_influence():
+    # ALiBi is an additive bias, not a mask -- an explicit causal mask
+    # must still block future positions when both are used together.
+    attn = xl.MultiHeadAttention(dim=16, num_heads=2, use_alibi=True, key=jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 16))
+    mask = xl.causal_mask(5)[None, None, :, :]
+
+    def out_at_pos0(x_):
+        return attn(x_, mask=mask)[0, 0]
+
+    x_perturbed = x.at[0, 4].add(100.0)
+    out1 = out_at_pos0(x)
+    out2 = out_at_pos0(x_perturbed)
+    assert jnp.allclose(out1, out2, atol=1e-4)
+
+
+def test_mha_rope_and_alibi_combine_without_error():
+    # Not a standard combination (see the use_alibi docstring), but
+    # nothing should prevent enabling both -- RoPE and ALiBi act at
+    # different points in the computation (pre- vs post-dot-product).
+    attn_rope_only = xl.MultiHeadAttention(dim=16, num_heads=2, use_rope=True, key=jax.random.PRNGKey(0))
+    attn_both = xl.MultiHeadAttention(dim=16, num_heads=2, use_rope=True, use_alibi=True, key=jax.random.PRNGKey(0))
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 16))
+    out_rope_only = attn_rope_only(x)
+    out_both = attn_both(x)
+    assert out_both.shape == out_rope_only.shape
+    assert not jnp.allclose(out_rope_only, out_both, atol=1e-4)
 
 
 def test_mha_dropout_deterministic_by_default():
@@ -175,6 +288,27 @@ def test_gqa_causal_mask_blocks_future():
 def test_gqa_rope_runs_and_changes_output():
     attn = xl.GroupedQueryAttention(
         dim=16, num_heads=4, num_kv_heads=2, use_rope=True, key=jax.random.PRNGKey(0)
+    )
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 16))
+    out = attn(x)
+    assert out.shape == (1, 5, 16)
+
+
+def test_gqa_alibi_runs_and_changes_output():
+    attn_plain = xl.GroupedQueryAttention(dim=16, num_heads=4, num_kv_heads=2, key=jax.random.PRNGKey(0))
+    attn_alibi = xl.GroupedQueryAttention(
+        dim=16, num_heads=4, num_kv_heads=2, use_alibi=True, key=jax.random.PRNGKey(0)
+    )
+    x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 16))
+    out_plain = attn_plain(x)
+    out_alibi = attn_alibi(x)
+    assert out_alibi.shape == (1, 5, 16)
+    assert not jnp.allclose(out_plain, out_alibi, atol=1e-4)
+
+
+def test_gqa_rope_and_alibi_combine_without_error():
+    attn = xl.GroupedQueryAttention(
+        dim=16, num_heads=4, num_kv_heads=2, use_rope=True, use_alibi=True, key=jax.random.PRNGKey(0)
     )
     x = jax.random.normal(jax.random.PRNGKey(1), (1, 5, 16))
     out = attn(x)

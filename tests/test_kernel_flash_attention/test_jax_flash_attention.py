@@ -1,11 +1,11 @@
-"""Tests for xera.loom.xenafl_attention: pure-jnp tiled attention with
+"""Tests for xera.loom.jax_flash_attention: pure-jnp tiled attention with
 online softmax (forward correctness and custom_vjp gradient correctness),
 checked against a plain non-tiled reference implementation."""
 
 import jax
 import jax.numpy as jnp
 import pytest
-from xera._kernel.flash_attention.xenafl_attention import xenafl_attention
+from xera._kernel.flash_attention.jax_flash_attention import jax_flash_attention
 
 
 def reference_attention(q, k, v, *, causal=False, scale=None, bias=None, window_left=None, window_right=None):
@@ -41,7 +41,7 @@ def _make_qkv(key, batch, heads, seq_len, head_dim, dtype=jnp.float32):
 
 
 def _call(q, k, v, bias=None, causal=False, scale=None, window_left=None, window_right=None, block_q=16, block_k=16):
-    return xenafl_attention(q, k, v, bias, causal, scale, window_left, window_right, block_q, block_k)
+    return jax_flash_attention(q, k, v, bias, causal, scale, window_left, window_right, block_q, block_k)
 
 
 # ---------------------------------------------------------------------------
@@ -119,13 +119,13 @@ def test_no_nans_with_narrow_window():
 def test_gradients_match_reference_causal():
     q, k, v = _make_qkv(jax.random.PRNGKey(0), 2, 3, 29, 8)
 
-    def loss_xenafl(q, k, v):
+    def loss_jax_flash_attention(q, k, v):
         return jnp.sum(_call(q, k, v, causal=True, block_q=16, block_k=16) ** 2)
 
     def loss_ref(q, k, v):
         return jnp.sum(reference_attention(q, k, v, causal=True) ** 2)
 
-    g_x = jax.grad(loss_xenafl, argnums=(0, 1, 2))(q, k, v)
+    g_x = jax.grad(loss_jax_flash_attention, argnums=(0, 1, 2))(q, k, v)
     g_r = jax.grad(loss_ref, argnums=(0, 1, 2))(q, k, v)
     for gx, gr in zip(g_x, g_r):
         assert jnp.allclose(gx, gr, atol=1e-3)
@@ -135,13 +135,13 @@ def test_gradients_match_reference_with_bias():
     q, k, v = _make_qkv(jax.random.PRNGKey(0), 2, 3, 29, 8)
     bias = jax.random.normal(jax.random.PRNGKey(1), (2, 3, 29, 29)) * 0.1
 
-    def loss_xenafl(q, k, v, bias):
+    def loss_jax_flash_attention(q, k, v, bias):
         return jnp.sum(_call(q, k, v, bias=bias, block_q=16, block_k=16) ** 2)
 
     def loss_ref(q, k, v, bias):
         return jnp.sum(reference_attention(q, k, v, bias=bias) ** 2)
 
-    g_x = jax.grad(loss_xenafl, argnums=(0, 1, 2, 3))(q, k, v, bias)
+    g_x = jax.grad(loss_jax_flash_attention, argnums=(0, 1, 2, 3))(q, k, v, bias)
     g_r = jax.grad(loss_ref, argnums=(0, 1, 2, 3))(q, k, v, bias)
     for name, gx, gr in zip(("dq", "dk", "dv", "dbias"), g_x, g_r):
         assert jnp.allclose(gx, gr, atol=1e-3), f"{name} mismatch"
@@ -151,13 +151,13 @@ def test_gradients_match_reference_causal_and_bias():
     q, k, v = _make_qkv(jax.random.PRNGKey(0), 2, 3, 29, 8)
     bias = jax.random.normal(jax.random.PRNGKey(1), (2, 3, 29, 29)) * 0.1
 
-    def loss_xenafl(q, k, v, bias):
+    def loss_jax_flash_attention(q, k, v, bias):
         return jnp.sum(_call(q, k, v, bias=bias, causal=True, block_q=16, block_k=16) ** 2)
 
     def loss_ref(q, k, v, bias):
         return jnp.sum(reference_attention(q, k, v, bias=bias, causal=True) ** 2)
 
-    g_x = jax.grad(loss_xenafl, argnums=(0, 1, 2, 3))(q, k, v, bias)
+    g_x = jax.grad(loss_jax_flash_attention, argnums=(0, 1, 2, 3))(q, k, v, bias)
     g_r = jax.grad(loss_ref, argnums=(0, 1, 2, 3))(q, k, v, bias)
     for name, gx, gr in zip(("dq", "dk", "dv", "dbias"), g_x, g_r):
         assert jnp.allclose(gx, gr, atol=1e-3), f"{name} mismatch"
@@ -166,13 +166,13 @@ def test_gradients_match_reference_causal_and_bias():
 def test_gradients_match_reference_local_window():
     q, k, v = _make_qkv(jax.random.PRNGKey(2), 1, 2, 40, 8)
 
-    def loss_xenafl(q, k, v):
+    def loss_jax_flash_attention(q, k, v):
         return jnp.sum(_call(q, k, v, window_left=5, window_right=5, block_q=16, block_k=16) ** 2)
 
     def loss_ref(q, k, v):
         return jnp.sum(reference_attention(q, k, v, window_left=5, window_right=5) ** 2)
 
-    g_x = jax.grad(loss_xenafl, argnums=(0, 1, 2))(q, k, v)
+    g_x = jax.grad(loss_jax_flash_attention, argnums=(0, 1, 2))(q, k, v)
     g_r = jax.grad(loss_ref, argnums=(0, 1, 2))(q, k, v)
     for gx, gr in zip(g_x, g_r):
         assert jnp.allclose(gx, gr, atol=1e-3)

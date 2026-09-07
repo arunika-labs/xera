@@ -9,6 +9,7 @@ rotary position embeddings.
 """
 
 from __future__ import annotations
+import math
 import jax
 import jax.numpy as jnp
 from .module import Module
@@ -34,6 +35,74 @@ def causal_mask(seq_len):
     return jnp.tril(jnp.ones((seq_len, seq_len), dtype=bool))
 
 
+def alibi_slopes(num_heads):
+    """
+    Compute the per-head ALiBi slopes m_h from "Train Short, Test Long:
+    Attention with Linear Biases Enables Input Length Extrapolation"
+    (Press et al., 2021, https://arxiv.org/abs/2108.12409).
+
+    For a power-of-2 `num_heads`, slopes follow a geometric sequence
+    starting at 2**(-8/num_heads) and ratio 2**(-8/num_heads) (e.g. for 8
+    heads: 1/2, 1/4, ..., 1/256). For other head counts, the sequence is
+    extended by interleaving slopes from the next power of 2, as
+    described in the paper's appendix.
+
+    Args:
+        num_heads: Number of attention heads.
+
+    Returns:
+        A float32 array of shape (num_heads,), one slope per head, in the
+        same head order as the rest of this module's (B, H, T, D) layout.
+    """
+    def _slopes_power_of_2(n):
+        start = 2.0 ** (-8.0 / n)
+        return [start * (start ** i) for i in range(n)]
+
+    if math.log2(num_heads).is_integer():
+        slopes = _slopes_power_of_2(num_heads)
+    else:
+        closest_pow2 = 2 ** math.floor(math.log2(num_heads))
+        slopes = _slopes_power_of_2(closest_pow2)
+        extra = alibi_slopes(2 * closest_pow2)[0::2][: num_heads - closest_pow2]
+        slopes = slopes + list(extra)
+    return jnp.array(slopes, dtype=jnp.float32)
+
+
+def alibi_bias(num_heads, seq_len_q, seq_len_k=None):
+    """
+    Build the ALiBi additive attention bias for all heads.
+
+    ALiBi (Press et al., 2021) adds a static, non-learned penalty to the
+    pre-softmax attention logits, proportional to the distance between
+    query and key positions, scaled by a head-specific slope (see
+    `alibi_slopes`). Unlike RoPE, this acts *after* the Q/K dot product --
+    it never touches Q/K themselves -- so it composes cleanly with RoPE
+    (or any other pre-dot-product positional scheme) applied on the same
+    layer; the two are not mutually exclusive.
+
+    Args:
+        num_heads: Number of attention heads.
+        seq_len_q: Query sequence length.
+        seq_len_k: Key sequence length. Defaults to `seq_len_q` (the
+            common self-attention case). Pass this explicitly for
+            cross-attention, where query and key sequence lengths differ.
+
+    Returns:
+        A float32 array of shape (num_heads, seq_len_q, seq_len_k), ready
+        to broadcast against (batch, num_heads, seq_len_q, seq_len_k)
+        attention logits -- e.g. via `bias[None]` when passing it to
+        `sdpa_flash`, or added directly to `scores` in this module's
+        manual einsum-based layers.
+    """
+    if seq_len_k is None:
+        seq_len_k = seq_len_q
+    slopes = alibi_slopes(num_heads)                          # (H,)
+    pos_q = jnp.arange(seq_len_q)[:, None]                    # (Tq, 1)
+    pos_k = jnp.arange(seq_len_k)[None, :]                    # (1, Tk)
+    rel_pos = jnp.abs(pos_k - pos_q).astype(jnp.float32)      # (Tq, Tk)
+    return -slopes[:, None, None] * rel_pos[None]             # (H, Tq, Tk)
+
+
 class MultiHeadAttention(Module):
     """
     Multi-head attention mechanism.
@@ -48,10 +117,31 @@ class MultiHeadAttention(Module):
         dropout_rate: Dropout rate for attention weights (default: 0.0).
         use_rope: Whether to use rotary position embeddings (default: False).
         rope_base: Base for rotary position embedding frequencies (default: 10000.0).
+        use_alibi: Whether to add ALiBi (Press et al., 2021) attention
+            bias (default: False). Unlike `use_rope`, this doesn't touch
+            Q/K -- it adds a static distance penalty to the logits after
+            the dot product -- so it composes with `use_rope`: both may
+            be True at once. This is not a standard combination and
+            hasn't been studied in the literature the way either
+            technique alone has, but there is nothing that prevents it
+            mechanically: RoPE and ALiBi act at different points in the
+            computation (pre- vs post-dot-product) and don't interfere
+            structurally. Empirically, RoPE alone is typically more
+            accurate within its training length but degrades sharply
+            when extrapolated beyond it; ALiBi alone is typically less
+            accurate at training length but extrapolates far more
+            gracefully. Whether combining them keeps RoPE's in-length
+            accuracy while inheriting ALiBi's extrapolation robustness is
+            worth testing empirically for your own setup rather than
+            assumed -- if you try it, treat this as a genuine experiment.
     
     Example:
         >>> attn = MultiHeadAttention(dim=512, num_heads=8, dropout_rate=0.1)
         >>> output = attn(input_tensor, mask=causal_mask(seq_len))
+        >>> # ALiBi instead of RoPE:
+        >>> attn = MultiHeadAttention(dim=512, num_heads=8, use_alibi=True)
+        >>> # Both at once -- see the `use_alibi` note above:
+        >>> attn = MultiHeadAttention(dim=512, num_heads=8, use_rope=True, use_alibi=True)
     """
     
     dim: int
@@ -59,6 +149,7 @@ class MultiHeadAttention(Module):
     dropout_rate: float = 0.0
     use_rope: bool = False
     rope_base: float = 10000.0
+    use_alibi: bool = False
 
     def setup(self):
         """Initialize the attention projections and optional rotary embeddings."""
@@ -98,6 +189,8 @@ class MultiHeadAttention(Module):
             k = self.rope(k)
 
         scores = jnp.einsum("bhtd,bhsd->bhts", q, k) / jnp.sqrt(D)
+        if self.use_alibi:
+            scores = scores + alibi_bias(H, T, T)[None]
         if mask is not None:
             scores = jnp.where(mask, scores, -jnp.inf)
         attn = jax.nn.softmax(scores, axis=-1)
@@ -123,6 +216,9 @@ class GroupedQueryAttention(Module):
         dropout_rate: Dropout rate for attention weights (default: 0.0).
         use_rope: Whether to use rotary position embeddings (default: False).
         rope_base: Base for rotary position embedding frequencies (default: 10000.0).
+        use_alibi: Whether to add ALiBi attention bias (default: False).
+            See `MultiHeadAttention`'s `use_alibi` docstring for the
+            RoPE+ALiBi combination notes -- they apply identically here.
     
     Example:
         >>> attn = GroupedQueryAttention(dim=512, num_heads=8, num_kv_heads=2)
@@ -135,6 +231,7 @@ class GroupedQueryAttention(Module):
     dropout_rate: float = 0.0
     use_rope: bool = False
     rope_base: float = 10000.0
+    use_alibi: bool = False
 
     def setup(self):
         """Initialize the attention projections with grouped-query configuration."""
@@ -182,6 +279,8 @@ class GroupedQueryAttention(Module):
         v = jnp.repeat(v, group, axis=1)
 
         scores = jnp.einsum("bhtd,bhsd->bhts", q, k) / jnp.sqrt(D)
+        if self.use_alibi:
+            scores = scores + alibi_bias(H, T, T)[None]
         if mask is not None:
             scores = jnp.where(mask, scores, -jnp.inf)
         attn = jax.nn.softmax(scores, axis=-1)
@@ -251,4 +350,7 @@ class SelfAttention(Module):
         return self.out_proj(out)
 
 
-__all__ = ["MultiHeadAttention", "GroupedQueryAttention", "SelfAttention", "causal_mask"]
+__all__ = [
+    "MultiHeadAttention", "GroupedQueryAttention", "SelfAttention",
+    "causal_mask", "alibi_bias", "alibi_slopes",
+]

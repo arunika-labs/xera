@@ -5,12 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Renamed `auto_flash_attention` to `sdpa_flash` (`xera.functional.sdpa_flash`, i.e. `F.sdpa_flash`). The `backend` argument now defaults to `"auto"` instead of `None`, and the portable-kernel backend option is now `"jax"` instead of `"jax_flash_attention"` (alongside the existing `"cudnn"` and `"splash"` options).
+- `sdpa_flash`'s `backend="auto"` dispatch now does real preflight hardware checks instead of dtype-only checks: the cuDNN path checks the GPU's actual `compute_capability` and requires sm_80+ (Ampere or newer), and the splash path requires `head_dim` to be a multiple of 128 (matching the Pallas TPU kernel's tiling requirement). Both fall back to `"jax"` when the check fails, same as an unsupported dtype/bias/local_window_size already did.
+- `sdpa_flash` no longer prints a fallback explanation by default. Added a `verbose` argument (default `False`); pass `verbose=True` to get the `XeraInfo: ...` line explaining why `backend="auto"` fell back to `"jax"`.
+
+### Known limitation
+- The cuDNN backend does not support fp8, even though cuDNN's fused kernel itself can: the public `jax.nn.dot_product_attention` wrapper this backend calls doesn't expose cuDNN's fp8 parameters, so fp8 isn't reachable through this code path regardless of GPU/cuDNN version.
+
 ## [0.1.0] - 2026-08-18
 
 ### Added
 - `xera.loom.functional` module with activation and utility functions, exposed via the `F` alias.
 - `auto_flash_attention` (AutoFA) core primitive with automatic backend selection across TPU/GPU, including TPU shape validation and GPU compute-capability checks with fallback behavior.
-- `XeraNaiveFlash` attention implementation and `xenafl_attention`, with fallback handling for unsupported attention requests.
+- `XeraNaiveFlash` attention implementation and `jax_flash_attention`, with fallback handling for unsupported attention requests.
 - `xera.loom.flash_attention` subpackage, separating flash-attention implementations from the rest of `xera.loom`.
 - Additional normalization layers, convolution operations, pooling operations, embedding and rotary embedding support, and `Conv`/`SSM` layers in `xera.loom`.
 - `Partition` optimizer and additional optimizer wrappers in `xera.weave`.

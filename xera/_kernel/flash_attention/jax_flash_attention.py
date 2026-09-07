@@ -389,7 +389,7 @@ def _backward_single(
 # ---------------------------------------------------------------------------
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(4, 5, 6, 7, 8, 9))
-def xenafl_attention(
+def jax_flash_attention(
     q, k, v, bias,
     causal, scale, window_left, window_right, block_q, block_k,
 ):
@@ -422,7 +422,7 @@ def xenafl_attention(
         Output array of shape (batch, num_heads, seq_len, head_dim), same
         dtype as `q`.
     """
-    out, _lse = _xenafl_forward_impl(
+    out, _lse = _jax_flash_attention_forward_impl(
         q, k, v, bias,
         causal=causal, scale=scale, window_left=window_left, window_right=window_right,
         block_q=block_q, block_k=block_k,
@@ -430,7 +430,7 @@ def xenafl_attention(
     return out
 
 
-def _xenafl_forward_impl(
+def _jax_flash_attention_forward_impl(
     q, k, v, bias, *, causal, scale, window_left, window_right, block_q, block_k,
 ):
     _batch, _heads, _seq_len, head_dim = q.shape
@@ -454,8 +454,8 @@ def _xenafl_forward_impl(
     return out, lse
 
 
-def _xenafl_fwd(q, k, v, bias, causal, scale, window_left, window_right, block_q, block_k):
-    out, lse = _xenafl_forward_impl(
+def _jax_flash_attention_fwd(q, k, v, bias, causal, scale, window_left, window_right, block_q, block_k):
+    out, lse = _jax_flash_attention_forward_impl(
         q, k, v, bias,
         causal=causal, scale=scale, window_left=window_left, window_right=window_right,
         block_q=block_q, block_k=block_k,
@@ -464,7 +464,7 @@ def _xenafl_fwd(q, k, v, bias, causal, scale, window_left, window_right, block_q
     return out, residuals
 
 
-def _xenafl_bwd(causal, scale, window_left, window_right, block_q, block_k, residuals, d_out):
+def _jax_flash_attention_bwd(causal, scale, window_left, window_right, block_q, block_k, residuals, d_out):
     q, k, v, bias, out, lse = residuals
     _batch, _heads, _seq_len, head_dim = q.shape
     resolved_scale = _resolve_scale(scale, head_dim)
@@ -508,7 +508,7 @@ def _unbroadcast(grad, target_shape):
     return grad.reshape(target_shape)
 
 
-xenafl_attention.defvjp(_xenafl_fwd, _xenafl_bwd)
+jax_flash_attention.defvjp(_jax_flash_attention_fwd, _jax_flash_attention_bwd)
 
 
-__all__ = ["xenafl_attention"]
+__all__ = ["jax_flash_attention"]

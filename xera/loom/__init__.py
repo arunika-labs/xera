@@ -15,11 +15,14 @@ from .normalization import (
     GroupNormWithRunningStats,
 )
 from .stochastic import Dropout
-from .attention import MultiHeadAttention, GroupedQueryAttention, SelfAttention, causal_mask
+from .attention import (
+    MultiHeadAttention, GroupedQueryAttention, SelfAttention,
+    causal_mask, alibi_bias, alibi_slopes,
+)
 from .transformer import MLP, TransformerBlock
 from .recurrent import SSM, SelectiveSSM, MambaBlock
 from .combinators import Sequential, Residual, Lambda
-from .._kernel.flash_attention import xenafl_attention
+from .._kernel.flash_attention import jax_flash_attention
 
 __all__ = [
     "Module",
@@ -47,6 +50,8 @@ __all__ = [
     "GroupedQueryAttention",
     "SelfAttention",
     "causal_mask",
+    "alibi_bias",
+    "alibi_slopes",
     "MLP",
     "TransformerBlock",
     "SSM",
@@ -55,5 +60,5 @@ __all__ = [
     "Sequential",
     "Residual",
     "Lambda",
-    "xenafl_attention",
+    "jax_flash_attention",
 ]
