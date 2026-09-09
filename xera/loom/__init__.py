@@ -1,7 +1,7 @@
 from .._rng import RNGPool
 from . import initializers
 from .module import Module, Buffer, param
-from .linear import Linear
+from .linear import Linear, LoRALinear, DoRALinear
 from .conv import Conv, ConvTranspose
 from .pooling import MaxPool, AvgPool, GlobalAvgPool
 from .embedding import Embedding, RotaryEmbedding
@@ -31,6 +31,8 @@ __all__ = [
     "param",
     "initializers",
     "Linear",
+    "LoRALinear",
+    "DoRALinear",
     "Conv",
     "ConvTranspose",
     "MaxPool",
