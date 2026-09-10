@@ -10,7 +10,7 @@ implementations.
 This is one module inside the `xera.functional` package. Unlike this
 one, not everything under `functional/` is a thin alias -- see
 `attention.py` in this same package, which holds an original
-implementation (`sdpa_flash`) rather than a re-export. The
+implementation (`flash_sdpa`) rather than a re-export. The
 package as a whole mirrors `jax.nn`, which is likewise a mix of thin
 aliases (`jax.nn.relu`) and original implementations
 (`jax.nn.dot_product_attention`).

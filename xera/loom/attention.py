@@ -91,7 +91,7 @@ def alibi_bias(num_heads, seq_len_q, seq_len_k=None):
         A float32 array of shape (num_heads, seq_len_q, seq_len_k), ready
         to broadcast against (batch, num_heads, seq_len_q, seq_len_k)
         attention logits -- e.g. via `bias[None]` when passing it to
-        `sdpa_flash`, or added directly to `scores` in this module's
+        `flash_sdpa`, or added directly to `scores` in this module's
         manual einsum-based layers.
     """
     if seq_len_k is None:

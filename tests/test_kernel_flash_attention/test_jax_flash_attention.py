@@ -1,11 +1,13 @@
-"""Tests for xera.loom.jax_flash_attention: pure-jnp tiled attention with
-online softmax (forward correctness and custom_vjp gradient correctness),
-checked against a plain non-tiled reference implementation."""
+"""Tests for the private "jax" flash-attention kernel
+(xera._kernel.flash_attention.jax_flash_attention._jax_flash_attention):
+pure-jnp tiled attention with online softmax (forward correctness and
+custom_vjp gradient correctness), checked against a plain non-tiled
+reference implementation."""
 
 import jax
 import jax.numpy as jnp
 import pytest
-from xera._kernel.flash_attention.jax_flash_attention import jax_flash_attention
+from xera._kernel.flash_attention.jax_flash_attention import _jax_flash_attention
 
 
 def reference_attention(q, k, v, *, causal=False, scale=None, bias=None, window_left=None, window_right=None):
@@ -41,7 +43,7 @@ def _make_qkv(key, batch, heads, seq_len, head_dim, dtype=jnp.float32):
 
 
 def _call(q, k, v, bias=None, causal=False, scale=None, window_left=None, window_right=None, block_q=16, block_k=16):
-    return jax_flash_attention(q, k, v, bias, causal, scale, window_left, window_right, block_q, block_k)
+    return _jax_flash_attention(q, k, v, bias, causal, scale, window_left, window_right, block_q, block_k)
 
 
 # ---------------------------------------------------------------------------

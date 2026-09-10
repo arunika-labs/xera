@@ -1,5 +1,5 @@
 """Tests for xera.functional: activation functions re-exported from jax.nn,
-plus sdpa_flash. Lives as its own top-level package, separate
+plus flash_sdpa. Lives as its own top-level package, separate
 from xera.loom (layers)."""
 
 import jax
@@ -47,8 +47,8 @@ def test_glu_and_one_hot_exposed_on_functional():
     assert hasattr(xf, "one_hot")
 
 
-def test_sdpa_flash_exposed_on_functional():
-    assert hasattr(xf, "sdpa_flash")
+def test_flash_sdpa_exposed_on_functional():
+    assert hasattr(xf, "flash_sdpa")
 
 
 @pytest.mark.parametrize("name", ACTIVATION_NAMES)
@@ -104,9 +104,9 @@ def test_one_hot_basic():
 
 
 def test_loom_no_longer_re_exports_functional():
-    # loom is layers-only now; activations/sdpa_flash live
+    # loom is layers-only now; activations/flash_sdpa live
     # exclusively in xera.functional after the split.
     import xera.loom as xl
 
     assert not hasattr(xl, "relu")
-    assert not hasattr(xl, "sdpa_flash")
+    assert not hasattr(xl, "flash_sdpa")

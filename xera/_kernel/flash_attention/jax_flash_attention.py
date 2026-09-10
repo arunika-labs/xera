@@ -389,12 +389,19 @@ def _backward_single(
 # ---------------------------------------------------------------------------
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(4, 5, 6, 7, 8, 9))
-def jax_flash_attention(
+def _jax_flash_attention(
     q, k, v, bias,
     causal, scale, window_left, window_right, block_q, block_k,
 ):
     """
     XeraNaiveFlash attention: pure-jnp tiled attention with online softmax.
+
+    Private: this is the "jax" backend's implementation, kept exactly as
+    unreachable from outside `xera._kernel` as the cuDNN and splash
+    backends are. The only public entry point is `flash_sdpa`
+    (`backend="jax"` to force this path); tile sizes (`block_q`/`block_k`)
+    are configurable there too, so there is no longer a reason to reach
+    this function directly.
 
     O(seq_len) memory in both the forward and backward pass (fixed block
     size), by construction -- the full (seq_len, seq_len) score/probability
@@ -508,7 +515,10 @@ def _unbroadcast(grad, target_shape):
     return grad.reshape(target_shape)
 
 
-jax_flash_attention.defvjp(_jax_flash_attention_fwd, _jax_flash_attention_bwd)
+_jax_flash_attention.defvjp(_jax_flash_attention_fwd, _jax_flash_attention_bwd)
 
 
-__all__ = ["jax_flash_attention"]
+# No public symbols: this module is reached only through
+# `xera._kernel.flash_attention.flash_sdpa` (backend="jax"), same as the
+# cuDNN/splash backends are reached only through the dispatcher.
+__all__ = []

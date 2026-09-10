@@ -1,7 +1,7 @@
-"""Tests for xera.functional.sdpa_flash: AutoFA backend dispatch.
+"""Tests for xera.functional.flash_sdpa: AutoFA backend dispatch.
 
-sdpa_flash supports three backends: cuDNN (GPU), splash attention (TPU),
-and "jax" (`xera.loom.jax_flash_attention`) -- a pure-jnp, dtype-/device-/
+flash_sdpa supports three backends: cuDNN (GPU), splash attention (TPU),
+and "jax" (a private pure-jnp, dtype-/device-/
 feature-agnostic implementation that always works, and is used as:
 
   - The *only* backend on CPU (or any platform other than GPU/TPU).
@@ -19,7 +19,7 @@ feature-agnostic implementation that always works, and is used as:
         windowed-masking support, so requesting either on TPU falls back
         to "jax".
 
-By default (`verbose=False`), `sdpa_flash` never prints anything --
+By default (`verbose=False`), `flash_sdpa` never prints anything --
 whether `backend="auto"` fell back to "jax" or not is not reported.
 Passing `verbose=True` makes a fallback print a single plain
 `XeraInfo: ...` line explaining why. This is never a `warnings.warn` --
@@ -28,9 +28,10 @@ specific backend (`backend="cudnn"`/`"splash"`/`"jax"`) never falls back
 and never prints regardless of `verbose`, since forcing means "use
 exactly this, or raise."
 
-`sdpa_flash` is the public functional entry point and lives in
-`xera.functional` (separate from `xera.loom`, which holds `Module`
-layers plus the `jax_flash_attention` kernel implementation itself).
+`flash_sdpa` is the public functional entry point and lives in
+`xera.functional` (separate from `xera.loom`, which holds only `Module`
+layers -- the "jax" backend's kernel implementation is private to
+`xera._kernel`, not reachable from `xera.loom` or anywhere else).
 
 This environment has no GPU/TPU, so the real cuDNN/splash backend calls
 aren't exercised end-to-end here; the preflight compatibility checks and
@@ -46,7 +47,7 @@ import jax.numpy as jnp
 import pytest
 import xera.loom as xl
 import xera.functional as xf
-from xera._kernel.flash_attention.sdpa_flash import (
+from xera._kernel.flash_attention.flash_sdpa import (
     _cudnn_compatibility_issue,
     _splash_compatibility_issue,
     _parse_compute_capability,
@@ -88,29 +89,35 @@ _SPLASH_HEAD_DIM = 128
 # Public API surface.
 # ---------------------------------------------------------------------------
 
-def test_sdpa_flash_exposed_on_functional():
-    assert hasattr(xf, "sdpa_flash")
-    assert hasattr(xl, "jax_flash_attention")
+def test_flash_sdpa_exposed_on_functional():
+    assert hasattr(xf, "flash_sdpa")
+
+
+def test_jax_flash_attention_kernel_not_reachable_from_loom():
+    # Regression guard: the "jax" backend's kernel is private to
+    # xera._kernel and must never be reachable as a standalone public
+    # symbol, same as the cuDNN/splash backends never were.
+    assert not hasattr(xl, "jax_flash_attention")
 
 
 def test_invalid_backend_raises_value_error():
     q, k, v = _make_qkv(1, 2, 8, 8)
     with pytest.raises(ValueError, match="backend must be one of"):
-        xf.sdpa_flash(q, k, v, backend="bogus")
+        xf.flash_sdpa(q, k, v, backend="bogus")
 
 
 def test_naive_backend_no_longer_a_valid_option():
     # "naive" used to be a valid backend value; "jax" replaced it.
     q, k, v = _make_qkv(1, 2, 8, 8)
     with pytest.raises(ValueError, match="backend must be one of"):
-        xf.sdpa_flash(q, k, v, backend="naive")
+        xf.flash_sdpa(q, k, v, backend="naive")
 
 
 def test_none_is_no_longer_a_valid_backend_value():
     # backend used to default to/accept None for auto-dispatch; "auto" replaced it.
     q, k, v = _make_qkv(1, 2, 8, 8)
     with pytest.raises(ValueError, match="backend must be one of"):
-        xf.sdpa_flash(q, k, v, backend=None)
+        xf.flash_sdpa(q, k, v, backend=None)
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +128,7 @@ def test_auto_on_cpu_uses_jax_backend_and_is_correct():
     # This test environment's real platform is CPU. "jax" is the only
     # backend there, so this should just work (no exception).
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
-    out = xf.sdpa_flash(q, k, v, causal=True)
+    out = xf.flash_sdpa(q, k, v, causal=True)
     assert out.shape == q.shape
 
 
@@ -131,7 +138,7 @@ def test_auto_on_cpu_prints_nothing_even_with_verbose():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        xf.sdpa_flash(q, k, v, causal=True, verbose=True)
+        xf.flash_sdpa(q, k, v, causal=True, verbose=True)
     assert buf.getvalue() == ""
 
 
@@ -144,13 +151,13 @@ def test_forced_cudnn_backend_raises_without_gpu_support():
     # fall back to "jax" -- forcing means "use exactly this, or fail".
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     with pytest.raises(ValueError, match="cudnn"):
-        xf.sdpa_flash(q, k, v, backend="cudnn")
+        xf.flash_sdpa(q, k, v, backend="cudnn")
 
 
 def test_forced_splash_backend_raises_on_unsupported_dtype():
     q, k, v = _make_qkv(1, 2, 8, _SPLASH_HEAD_DIM, dtype=jnp.float32)
     with pytest.raises(ValueError, match="splash"):
-        xf.sdpa_flash(q, k, v, backend="splash")
+        xf.flash_sdpa(q, k, v, backend="splash")
 
 
 def test_forced_cudnn_backend_accepts_bias():
@@ -162,10 +169,10 @@ def test_forced_cudnn_backend_accepts_bias():
     fake_device = _fake_gpu_device("8.0")
     with mock.patch("jax.devices", return_value=[fake_device]):
         with mock.patch(
-            "xera._kernel.flash_attention.sdpa_flash.jax.nn.dot_product_attention",
+            "xera._kernel.flash_attention.flash_sdpa.jax.nn.dot_product_attention",
             return_value=jnp.zeros((1, 8, 2, 8), dtype=jnp.bfloat16),
         ) as mocked:
-            out = xf.sdpa_flash(q, k, v, bias=bias, backend="cudnn")
+            out = xf.flash_sdpa(q, k, v, bias=bias, backend="cudnn")
     assert out.shape == q.shape
     _, kwargs = mocked.call_args
     assert kwargs["bias"] is not None
@@ -179,10 +186,10 @@ def test_forced_cudnn_backend_accepts_local_window():
     fake_device = _fake_gpu_device("8.0")
     with mock.patch("jax.devices", return_value=[fake_device]):
         with mock.patch(
-            "xera._kernel.flash_attention.sdpa_flash.jax.nn.dot_product_attention",
+            "xera._kernel.flash_attention.flash_sdpa.jax.nn.dot_product_attention",
             return_value=jnp.zeros((1, 8, 2, 8), dtype=jnp.bfloat16),
         ) as mocked:
-            out = xf.sdpa_flash(q, k, v, local_window_size=4, backend="cudnn")
+            out = xf.flash_sdpa(q, k, v, local_window_size=4, backend="cudnn")
     assert out.shape == q.shape
     _, kwargs = mocked.call_args
     assert kwargs["local_window_size"] == 4
@@ -195,26 +202,26 @@ def test_forced_cudnn_backend_rejects_old_gpu():
     fake_device = _fake_gpu_device("7.5")
     with mock.patch("jax.devices", return_value=[fake_device]):
         with pytest.raises(ValueError, match="sm_80"):
-            xf.sdpa_flash(q, k, v, backend="cudnn")
+            xf.flash_sdpa(q, k, v, backend="cudnn")
 
 
 def test_forced_splash_backend_rejects_bias():
     q, k, v = _make_qkv(1, 2, 8, _SPLASH_HEAD_DIM, dtype=jnp.bfloat16)
     bias = jnp.zeros((1, 2, 8, 8), dtype=jnp.bfloat16)
     with pytest.raises(ValueError, match="bias"):
-        xf.sdpa_flash(q, k, v, bias=bias, backend="splash")
+        xf.flash_sdpa(q, k, v, bias=bias, backend="splash")
 
 
 def test_forced_splash_backend_rejects_local_window():
     q, k, v = _make_qkv(1, 2, 8, _SPLASH_HEAD_DIM, dtype=jnp.bfloat16)
     with pytest.raises(ValueError, match="local_window_size"):
-        xf.sdpa_flash(q, k, v, local_window_size=4, backend="splash")
+        xf.flash_sdpa(q, k, v, local_window_size=4, backend="splash")
 
 
 def test_forced_splash_backend_rejects_non_128_multiple_head_dim():
     q, k, v = _make_qkv(1, 2, 8, 96, dtype=jnp.bfloat16)
     with pytest.raises(ValueError, match="128"):
-        xf.sdpa_flash(q, k, v, backend="splash")
+        xf.flash_sdpa(q, k, v, backend="splash")
 
 
 def test_forced_backend_never_prints_even_when_raising_and_verbose():
@@ -222,21 +229,50 @@ def test_forced_backend_never_prints_even_when_raising_and_verbose():
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         with pytest.raises(ValueError):
-            xf.sdpa_flash(q, k, v, backend="cudnn", verbose=True)
+            xf.flash_sdpa(q, k, v, backend="cudnn", verbose=True)
     assert buf.getvalue() == ""
 
 
 def test_forced_jax_backend_works_directly():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
-    out = xf.sdpa_flash(q, k, v, causal=True, backend="jax")
+    out = xf.flash_sdpa(q, k, v, causal=True, backend="jax")
     assert out.shape == q.shape
+
+
+def test_jax_backend_accepts_custom_tile_sizes():
+    q, k, v = _make_qkv(1, 2, 37, 8, dtype=jnp.float32)
+    out = xf.flash_sdpa(q, k, v, causal=True, backend="jax", block_q=16, block_k=16)
+    assert out.shape == q.shape
+
+
+def test_auto_falling_back_to_jax_accepts_custom_tile_sizes():
+    q, k, v = _make_qkv(1, 2, 37, 8, dtype=jnp.float32)
+    fake_device = _fake_gpu_device("7.5")  # pre-Ampere: forces fallback to "jax"
+    with mock.patch("jax.devices", return_value=[fake_device]):
+        out = xf.flash_sdpa(q, k, v, causal=True, block_q=16, block_k=16)
+    assert out.shape == q.shape
+
+
+def test_cudnn_backend_rejects_custom_tile_sizes():
+    # Tile sizes are meaningless for cuDNN/splash, which manage their own
+    # tiling -- silently ignoring them would be more confusing than
+    # raising, so this must raise rather than a no-op.
+    q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
+    with pytest.raises(ValueError, match="block_q/block_k"):
+        xf.flash_sdpa(q, k, v, backend="cudnn", block_q=16, block_k=16)
+
+
+def test_splash_backend_rejects_custom_tile_sizes():
+    q, k, v = _make_qkv(1, 2, 8, _SPLASH_HEAD_DIM, dtype=jnp.float32)
+    with pytest.raises(ValueError, match="block_q/block_k"):
+        xf.flash_sdpa(q, k, v, backend="splash", block_q=16, block_k=16)
 
 
 def test_forced_jax_backend_prints_nothing_even_with_verbose():
     q, k, v = _make_qkv(1, 2, 8, 8, dtype=jnp.float32)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        xf.sdpa_flash(q, k, v, causal=True, backend="jax", verbose=True)
+        xf.flash_sdpa(q, k, v, causal=True, backend="jax", verbose=True)
     assert buf.getvalue() == ""
 
 
@@ -251,7 +287,7 @@ def test_auto_on_simulated_gpu_fallback_prints_nothing_by_default():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, causal=True)  # verbose defaults to False
+            out = xf.flash_sdpa(q, k, v, causal=True)  # verbose defaults to False
 
     assert out.shape == q.shape
     assert buf.getvalue() == ""
@@ -264,7 +300,7 @@ def test_auto_on_simulated_tpu_fallback_prints_nothing_by_default():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, causal=True)  # verbose defaults to False
+            out = xf.flash_sdpa(q, k, v, causal=True)  # verbose defaults to False
 
     assert out.shape == q.shape
     assert buf.getvalue() == ""
@@ -282,7 +318,7 @@ def test_auto_on_simulated_gpu_with_unsupported_dtype_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, causal=True, verbose=True)
+            out = xf.flash_sdpa(q, k, v, causal=True, verbose=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -301,7 +337,7 @@ def test_auto_on_simulated_old_gpu_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, causal=True, verbose=True)
+            out = xf.flash_sdpa(q, k, v, causal=True, verbose=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -319,7 +355,7 @@ def test_auto_on_simulated_gpu_with_undetectable_compute_capability_falls_back_a
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, causal=True, verbose=True)
+            out = xf.flash_sdpa(q, k, v, causal=True, verbose=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -338,11 +374,11 @@ def test_auto_on_simulated_gpu_with_bias_uses_cudnn_and_prints_nothing():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with mock.patch(
-            "xera._kernel.flash_attention.sdpa_flash.jax.nn.dot_product_attention",
+            "xera._kernel.flash_attention.flash_sdpa.jax.nn.dot_product_attention",
             return_value=jnp.zeros((1, 16, 2, 8), dtype=jnp.bfloat16),
         ) as mocked:
             with contextlib.redirect_stdout(buf):
-                out = xf.sdpa_flash(q, k, v, bias=bias, verbose=True)
+                out = xf.flash_sdpa(q, k, v, bias=bias, verbose=True)
 
     assert out.shape == q.shape
     assert buf.getvalue() == ""
@@ -357,7 +393,7 @@ def test_auto_on_simulated_tpu_with_unsupported_dtype_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, causal=True, verbose=True)
+            out = xf.flash_sdpa(q, k, v, causal=True, verbose=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -372,7 +408,7 @@ def test_auto_on_simulated_tpu_with_non_128_multiple_head_dim_falls_back_and_pri
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, causal=True, verbose=True)
+            out = xf.flash_sdpa(q, k, v, causal=True, verbose=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()
@@ -387,7 +423,7 @@ def test_auto_on_simulated_tpu_with_local_window_falls_back_and_prints():
     buf = io.StringIO()
     with mock.patch("jax.devices", return_value=[fake_device]):
         with contextlib.redirect_stdout(buf):
-            out = xf.sdpa_flash(q, k, v, local_window_size=4, verbose=True)
+            out = xf.flash_sdpa(q, k, v, local_window_size=4, verbose=True)
 
     assert out.shape == q.shape
     printed = buf.getvalue()

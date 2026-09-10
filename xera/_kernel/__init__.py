@@ -10,9 +10,8 @@ elsewhere (`xera.loom`, `xera.functional`) re-export from.
 Currently contains:
 
     - `flash_attention/` -- flash attention backend dispatch
-      (`sdpa_flash`) and the portable pure-jnp fallback kernel
-      (`jax_flash_attention`). See `xera._kernel.flash_attention` for
-      details.
+      (`flash_sdpa`), with the cuDNN/splash/portable-jax kernels behind
+      it all private. See `xera._kernel.flash_attention` for details.
 """
 
 from __future__ import annotations

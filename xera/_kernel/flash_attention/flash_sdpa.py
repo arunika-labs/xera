@@ -1,7 +1,7 @@
 """
 Scaled dot-product flash attention, with automatic backend selection.
 
-This module provides a single entry point, `sdpa_flash`, that picks a
+This module provides a single entry point, `flash_sdpa`, that picks a
 flash-attention implementation for the current JAX device:
 
     - TPU -> Splash Attention (Pallas TPU kernel, from jax.experimental.pallas),
@@ -23,11 +23,14 @@ flash-attention implementation for the current JAX device:
     - Anything else (CPU, etc.), or a GPU/TPU call that the vendor backend
       above can't serve (unsupported dtype/hardware, or -- on TPU only --
       a requested feature like bias/local windowing that splash doesn't
-      support) -> `jax_flash_attention` (see `xera.loom.jax_flash_attention`),
-      a pure-jnp tiled attention with online softmax. Dtype-, device-, and
-      feature-agnostic by construction, so it always works as a fallback.
+      support) -> the portable "jax" backend, a pure-jnp tiled attention
+      with online softmax, private to this package (not reachable from
+      outside `xera._kernel`, same as the cuDNN/splash backends).
+      Dtype-, device-, and feature-agnostic by construction, so it always
+      works as a fallback. Tile sizes for this backend are configurable
+      via `flash_sdpa`'s own `block_q`/`block_k` arguments.
 
-By default, `sdpa_flash` never prints anything -- whether `backend="auto"`
+By default, `flash_sdpa` never prints anything -- whether `backend="auto"`
 silently used the portable "jax" backend or the vendor kernel is not
 reported unless the caller passes `verbose=True`, in which case a single
 `XeraInfo: ...` line explains *why* dispatch fell back to "jax" (nothing
@@ -40,7 +43,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .jax_flash_attention import jax_flash_attention
+from .jax_flash_attention import _jax_flash_attention
 
 
 # cuDNN's fused attention kernel (as of the jax/jaxlib versions this module
@@ -70,7 +73,7 @@ _SPLASH_HEAD_DIM_MULTIPLE = 128
 
 def _info(reason: str, *, verbose: bool) -> None:
     if verbose:
-        print(f"XeraInfo: sdpa_flash falling back to backend='jax', because {reason}.")
+        print(f"XeraInfo: flash_sdpa falling back to backend='jax', because {reason}.")
 
 
 def _parse_compute_capability(device) -> tuple[int, int] | None:
@@ -246,9 +249,8 @@ def _flash_attention_splash(
 
 _VALID_BACKENDS = ("auto", "cudnn", "splash", "jax")
 
-# Default tile sizes jax_flash_attention uses when reached via auto-dispatch/vendor-fallback
-# (not user-configurable through this entry point -- call
-# `xera.loom.jax_flash_attention.jax_flash_attention` directly for that).
+# Default tile sizes for the "jax" backend, used whenever the caller
+# doesn't override block_q/block_k explicitly.
 _JAX_FLASH_ATTENTION_BLOCK_Q = 128
 _JAX_FLASH_ATTENTION_BLOCK_K = 128
 
@@ -262,8 +264,10 @@ def _flash_attention_jax(
     scale: float | None = None,
     bias: jax.Array | None = None,
     local_window_size: int | tuple[int | None, int | None] | None = None,
+    block_q: int = _JAX_FLASH_ATTENTION_BLOCK_Q,
+    block_k: int = _JAX_FLASH_ATTENTION_BLOCK_K,
 ) -> jax.Array:
-    """`sdpa_flash`'s portable-kernel path -- see `xera.loom.jax_flash_attention`."""
+    """`flash_sdpa`'s portable-kernel path (private "jax" backend)."""
     if local_window_size is None:
         window_left = window_right = None
     elif isinstance(local_window_size, tuple):
@@ -271,14 +275,14 @@ def _flash_attention_jax(
     else:
         window_left = window_right = local_window_size
 
-    return jax_flash_attention(
+    return _jax_flash_attention(
         q, k, v, bias,
         causal, scale, window_left, window_right,
-        _JAX_FLASH_ATTENTION_BLOCK_Q, _JAX_FLASH_ATTENTION_BLOCK_K,
+        block_q, block_k,
     )
 
 
-def sdpa_flash(
+def flash_sdpa(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
@@ -288,6 +292,8 @@ def sdpa_flash(
     bias: jax.Array | None = None,
     local_window_size: int | tuple[int | None, int | None] | None = None,
     backend: str = "auto",
+    block_q: int = _JAX_FLASH_ATTENTION_BLOCK_Q,
+    block_k: int = _JAX_FLASH_ATTENTION_BLOCK_K,
     verbose: bool = False,
 ) -> jax.Array:
     """
@@ -309,19 +315,20 @@ def sdpa_flash(
         - Anything else (CPU, etc.): the portable `"jax"` backend, always
           -- it's the only option there, not a "fallback" from anything.
 
-    The `"jax"` backend (`xera.loom.jax_flash_attention`) is a pure-jnp
-    tiled attention with online softmax: dtype-, device-, and
+    The `"jax"` backend is a pure-jnp tiled attention with online softmax,
+    private to `xera._kernel` (not reachable as a standalone function, same
+    as the cuDNN/splash backends never were): dtype-, device-, and
     feature-agnostic, so it always works regardless of platform, dtype,
     or whether bias/local_window_size were requested.
 
-    By default (`verbose=False`), `sdpa_flash` never prints anything --
+    By default (`verbose=False`), `flash_sdpa` never prints anything --
     whether `backend="auto"` used the vendor kernel or silently fell back
     to `"jax"` is not reported, so callers get the same output either way
     with nothing written to stdout. Pass `verbose=True` to have a single
     line printed whenever `backend="auto"` falls back to `"jax"`,
     explaining why:
 
-        XeraInfo: sdpa_flash falling back to backend='jax', because <reason>.
+        XeraInfo: flash_sdpa falling back to backend='jax', because <reason>.
 
     This is a plain `print()`, not a `warnings.warn` -- it's routine,
     expected behavior (not a problem to flag), so it doesn't carry a
@@ -349,6 +356,12 @@ def sdpa_flash(
             (raises if it's unavailable or doesn't support the requested
             dtype/features -- forcing a backend means "use exactly this,
             or fail", no fallback).
+        block_q, block_k: Tile sizes along the query/key sequence
+            dimension, used only by the `"jax"` backend (ignored -- and
+            rejected if not left at their default -- for `"cudnn"`/
+            `"splash"`, which manage their own tiling internally).
+            Defaults to 128/128. Only meaningful when `backend="jax"`, or
+            when `backend="auto"` falls back to it.
         verbose: If True, print a single line when `backend="auto"` falls
             back to `"jax"`, explaining why. Defaults to False, in which
             case dispatch is completely silent regardless of outcome.
@@ -358,6 +371,15 @@ def sdpa_flash(
     """
     if backend not in _VALID_BACKENDS:
         raise ValueError(f"backend must be one of {_VALID_BACKENDS}, got {backend!r}")
+
+    tile_sizes_overridden = (
+        block_q != _JAX_FLASH_ATTENTION_BLOCK_Q or block_k != _JAX_FLASH_ATTENTION_BLOCK_K
+    )
+    if backend in ("cudnn", "splash") and tile_sizes_overridden:
+        raise ValueError(
+            f"block_q/block_k only apply to backend='jax' (or 'auto' falling back to it); "
+            f"backend={backend!r} manages its own tiling and does not accept them."
+        )
 
     device = jax.devices()[0]
     platform = device.platform
@@ -379,6 +401,7 @@ def sdpa_flash(
     if backend == "jax":
         return _flash_attention_jax(
             q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+            block_q=block_q, block_k=block_k,
         )
 
     # backend == "auto": dispatch by platform, falling back to the
@@ -391,6 +414,7 @@ def sdpa_flash(
             _info(issue, verbose=verbose)
             return _flash_attention_jax(
                 q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+                block_q=block_q, block_k=block_k,
             )
         return _flash_attention_splash(q, k, v, causal=causal, scale=scale)
 
@@ -400,6 +424,7 @@ def sdpa_flash(
             _info(issue, verbose=verbose)
             return _flash_attention_jax(
                 q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+                block_q=block_q, block_k=block_k,
             )
         return _flash_attention_cudnn(
             q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
@@ -409,7 +434,8 @@ def sdpa_flash(
     # fallback happened, so nothing is printed regardless of `verbose`.
     return _flash_attention_jax(
         q, k, v, causal=causal, scale=scale, bias=bias, local_window_size=local_window_size,
+        block_q=block_q, block_k=block_k,
     )
 
 
-__all__ = ["sdpa_flash"]
+__all__ = ["flash_sdpa"]

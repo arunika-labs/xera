@@ -22,7 +22,6 @@ from .attention import (
 from .transformer import MLP, TransformerBlock
 from .recurrent import SSM, SelectiveSSM, MambaBlock
 from .combinators import Sequential, Residual, Lambda
-from .._kernel.flash_attention import jax_flash_attention
 
 __all__ = [
     "Module",
@@ -62,5 +61,4 @@ __all__ = [
     "Sequential",
     "Residual",
     "Lambda",
-    "jax_flash_attention",
 ]
