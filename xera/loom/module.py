@@ -121,6 +121,8 @@ class Module:
         Raises:
             RuntimeError: If self.rng() is called during setup but no key was provided.
         """
+        object.__setattr__(self, "_initializing", True)
+
         field_names = [f.name for f in dataclasses.fields(self)]
         positional = dict(zip(field_names, args))
         for name, val in {**positional, **kwargs}.items():
@@ -131,6 +133,32 @@ class Module:
         self.setup()
         if key is not None:
             object.__delattr__(self, "_rng_pool")
+
+        object.__setattr__(self, "_initializing", False)
+
+    def __setattr__(self, name, value):
+        """
+        Guard attribute assignment so it is only allowed during `setup()`.
+
+        Inside `setup()` (and during __init__ before it), the module is
+        "under construction" and plain `self.x = ...` assignments -- including
+        assigning the same submodule to two attributes on purpose (weight
+        tying) -- work exactly as before. Once construction finishes, any
+        further assignment (from `__call__`, or from outside the module) is
+        rejected, so accidental reference-sharing mutation after the fact
+        fails loudly instead of silently leaking into every attribute that
+        happens to point at the same object.
+
+        Raises:
+            AttributeError: If assignment is attempted after construction.
+        """
+        if not getattr(self, "_initializing", False):
+            raise AttributeError(
+                f"Tidak bisa mengubah atribut '{name}' setelah Module selesai "
+                f"dibuat (setup() sudah selesai). Module bersifat immutable "
+                f"di luar setup()."
+            )
+        object.__setattr__(self, name, value)
 
     def setup(self):
         """

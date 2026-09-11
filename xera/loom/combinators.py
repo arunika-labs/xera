@@ -122,7 +122,7 @@ class Sequential(Module):
         if stateful:
             new_self = object.__new__(type(self))
             new_self.__dict__.update(self.__dict__)
-            new_self.layers = new_layers
+            object.__setattr__(new_self, "layers", new_layers)
             return x, new_self
         return x
 
@@ -168,7 +168,7 @@ class Residual(Module):
         if new_inner is not self.inner:
             new_self = object.__new__(type(self))
             new_self.__dict__.update(self.__dict__)
-            new_self.inner = new_inner
+            object.__setattr__(new_self, "inner", new_inner)
             return result, new_self
         return result
 

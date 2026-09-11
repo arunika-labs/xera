@@ -165,8 +165,8 @@ def _replace_state(bn, new_mean, new_var):
     """
     new_bn = object.__new__(type(bn))
     new_bn.__dict__.update(bn.__dict__)
-    new_bn.running_mean = Buffer(new_mean)
-    new_bn.running_var = Buffer(new_var)
+    object.__setattr__(new_bn, "running_mean", Buffer(new_mean))
+    object.__setattr__(new_bn, "running_var", Buffer(new_var))
     return new_bn
 
 
@@ -383,8 +383,8 @@ def _replace_group_state(gn, new_mean, new_var):
     """
     new_gn = object.__new__(type(gn))
     new_gn.__dict__.update(gn.__dict__)
-    new_gn.running_mean = Buffer(new_mean)
-    new_gn.running_var = Buffer(new_var)
+    object.__setattr__(new_gn, "running_mean", Buffer(new_mean))
+    object.__setattr__(new_gn, "running_var", Buffer(new_var))
     return new_gn
 
 
