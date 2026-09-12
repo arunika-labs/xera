@@ -136,12 +136,13 @@ class MultiHeadAttention(Module):
             assumed -- if you try it, treat this as a genuine experiment.
     
     Example:
-        >>> attn = MultiHeadAttention(dim=512, num_heads=8, dropout_rate=0.1)
+        >>> import xera.loom as xl
+        >>> attn = xl.MultiHeadAttention(dim=512, num_heads=8, dropout_rate=0.1)
         >>> output = attn(input_tensor, mask=causal_mask(seq_len))
         >>> # ALiBi instead of RoPE:
-        >>> attn = MultiHeadAttention(dim=512, num_heads=8, use_alibi=True)
+        >>> attn = xl.MultiHeadAttention(dim=512, num_heads=8, use_alibi=True)
         >>> # Both at once -- see the `use_alibi` note above:
-        >>> attn = MultiHeadAttention(dim=512, num_heads=8, use_rope=True, use_alibi=True)
+        >>> attn = xl.MultiHeadAttention(dim=512, num_heads=8, use_rope=True, use_alibi=True)
     """
     
     dim: int
@@ -221,7 +222,8 @@ class GroupedQueryAttention(Module):
             RoPE+ALiBi combination notes -- they apply identically here.
     
     Example:
-        >>> attn = GroupedQueryAttention(dim=512, num_heads=8, num_kv_heads=2)
+        >>> import xera.loom as xl
+        >>> attn = xl.GroupedQueryAttention(dim=512, num_heads=8, num_kv_heads=2)
         >>> output = attn(input_tensor)
     """
 
@@ -304,7 +306,8 @@ class SelfAttention(Module):
         dropout_rate: Dropout rate for attention weights (default: 0.0).
     
     Example:
-        >>> attn = SelfAttention(dim=256, dropout_rate=0.1)
+        >>> import xera.loom as xl
+        >>> attn = xl.SelfAttention(dim=256, dropout_rate=0.1)
         >>> output = attn(input_tensor, context=encoder_output)
     """
 
