@@ -16,8 +16,10 @@ aliases (`jax.nn.relu`) and original implementations
 (`jax.nn.dot_product_attention`).
 
 Example:
-    >>> from xera.functional import relu, gelu, silu
-    >>> x = relu(x)
+    >>> import xera.functional as F
+    >>> x = F.relu(x)
+    >>> x = F.gelu(x)
+    >>> x = F.silu(x)
 """
 
 from __future__ import annotations
