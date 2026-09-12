@@ -16,10 +16,10 @@ mirrors how `activations.py` exposes `relu`, `gelu`, etc. as bare
 functions instead of bundling them under an `Activations` class.
 
 Example:
-    >>> from xera.functional import mae_loss, ce_loss, focal_loss
-    >>> loss = mae_loss(predictions, targets)
-    >>> ce = ce_loss(logits, labels)
-    >>> focal = focal_loss(logits, labels, alpha=0.25, gamma=2.0)
+    >>> import xera.functional as F
+    >>> loss = F.mae_loss(predictions, targets)
+    >>> ce = F.ce_loss(logits, labels)
+    >>> focal = F.focal_loss(logits, labels, alpha=0.25, gamma=2.0)
 """
 
 from __future__ import annotations
