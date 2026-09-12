@@ -27,7 +27,8 @@ class Embedding(Module):
         features: Dimension of the embedding vectors.
     
     Example:
-        >>> embed = Embedding(num_embeddings=10000, features=256)
+        >>> import xera.loom as xl
+        >>> embed = xl.Embedding(num_embeddings=10000, features=256)
         >>> embeddings = embed(token_ids)  # shape: (batch, seq_len, 256)
     """
 
@@ -68,7 +69,8 @@ class RotaryEmbedding(Module):
         base: The base for the frequency computation (default: 10000.0).
     
     Example:
-        >>> rope = RotaryEmbedding(dim=64, base=10000.0)
+        >>> import xera.loom as xl
+        >>> rope = xl.RotaryEmbedding(dim=64, base=10000.0)
         >>> rotated_q = rope(q)  # Apply to query vectors
         >>> rotated_k = rope(k)  # Apply to key vectors
     """
