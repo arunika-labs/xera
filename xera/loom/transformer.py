@@ -31,7 +31,8 @@ class MLP(Module):
         dropout_rate: Dropout rate for the hidden layer (default: 0.0).
     
     Example:
-        >>> mlp = MLP(dim=512, hidden_dim=2048, dropout_rate=0.1)
+        >>> import xera.loom as xl
+        >>> mlp = xl.MLP(dim=512, hidden_dim=2048, dropout_rate=0.1)
         >>> output = mlp(input_tensor, key=dropout_key, deterministic=False)
     """
     
@@ -79,7 +80,8 @@ class TransformerBlock(Module):
         dropout_rate: Dropout rate for attention and MLP (default: 0.0).
     
     Example:
-        >>> block = TransformerBlock(dim=512, num_heads=8, mlp_hidden_dim=2048)
+        >>> import xera.loom as xl
+        >>> block = xl.TransformerBlock(dim=512, num_heads=8, mlp_hidden_dim=2048)
         >>> output = block(input_tensor, mask=causal_mask(seq_len), key=dropout_key)
     """
     
