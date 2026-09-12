@@ -25,7 +25,8 @@ class LayerNorm(Module):
         eps: Small constant for numerical stability (default: 1e-5).
     
     Example:
-        >>> ln = LayerNorm(dim=512)
+        >>> import xera.loom as xl
+        >>> ln = xl.LayerNorm(dim=512)
         >>> output = ln(input_tensor)
     """
     
@@ -66,7 +67,8 @@ class RMSNorm(Module):
         eps: Small constant for numerical stability (default: 1e-6).
     
     Example:
-        >>> rms = RMSNorm(dim=512)
+        >>> import xera.loom as xl
+        >>> rms = xl.RMSNorm(dim=512)
         >>> output = rms(input_tensor)
     """
 
@@ -106,7 +108,8 @@ class BatchNorm(Module):
         eps: Small constant for numerical stability (default: 1e-5).
     
     Example:
-        >>> bn = BatchNorm(dim=64)
+        >>> import xera.loom as xl
+        >>> bn = xl.BatchNorm(dim=64)
         >>> output, new_bn = bn(input_tensor, deterministic=False)
     """
     
@@ -184,7 +187,8 @@ class GroupNorm(Module):
         eps: Small constant for numerical stability (default: 1e-5).
     
     Example:
-        >>> gn = GroupNorm(num_groups=8, dim=64)
+        >>> import xera.loom as xl
+        >>> gn = xl.GroupNorm(num_groups=8, dim=64)
         >>> output = gn(input_tensor)
     """
     
@@ -229,7 +233,8 @@ class InstanceNorm(Module):
         eps: Small constant for numerical stability (default: 1e-5).
     
     Example:
-        >>> inorm = InstanceNorm(dim=64)
+        >>> import xera.loom as xl
+        >>> inorm = xl.InstanceNorm(dim=64)
         >>> output = inorm(input_tensor)
     """
     
@@ -271,7 +276,8 @@ class LayerScale(Module):
         init_value: Initial value for the scale (default: 1e-5).
     
     Example:
-        >>> ls = LayerScale(dim=256, init_value=1e-5)
+        >>> import xera.loom as xl
+        >>> ls = xl.LayerScale(dim=256, init_value=1e-5)
         >>> output = ls(input_tensor)
     """
     
@@ -314,7 +320,8 @@ class GroupNormWithRunningStats(Module):
         eps: Small constant for numerical stability (default: 1e-5).
     
     Example:
-        >>> gn = GroupNormWithRunningStats(num_groups=8, dim=64)
+        >>> import xera.loom as xl
+        >>> gn = xl.GroupNormWithRunningStats(num_groups=8, dim=64)
         >>> output, new_gn = gn(input_tensor, deterministic=False)
     """
     
