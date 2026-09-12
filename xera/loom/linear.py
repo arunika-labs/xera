@@ -85,14 +85,6 @@ class LoRALinear(Module):
     true no-op and only diverges from the frozen base as training
     proceeds.
 
-    For the common case of adapting a small number of large pretrained
-    weights, `base_weight` is supplied once at construction and owned by
-    this layer (frozen). If instead a base weight needs to be shared
-    across many adapters at once -- e.g. many low-rank "virtual experts"
-    built on top of one common base, as in mixture-of-experts-style
-    architectures -- pass the base weight as an argument to `__call__`
-    instead of at construction; see `__call__`'s `base_weight` parameter.
-
     Attributes:
         in_features: Number of input features.
         out_features: Number of output features.
@@ -113,11 +105,6 @@ class LoRALinear(Module):
         >>> pretrained_w = jnp.load("layer_weight.npy")
         >>> layer = xl.LoRALinear(768, 768, rank=8, base_weight=pretrained_w, key=key)
         >>> output = layer(input_tensor)
-        >>>
-        >>> # Sharing one base weight across many low-rank adapters:
-        >>> shared_base = jnp.zeros((768, 3072))
-        >>> experts = [xl.LoRALinear(768, 3072, rank=8, key=k) for k in keys]
-        >>> outputs = [e(x, base_weight=shared_base) for e in experts]
     """
 
     in_features: int
@@ -208,13 +195,6 @@ class DoRALinear(Module):
     weight's own column norms, so the *initial* effective weight equals
     `W_base` exactly -- see `setup`).
 
-    Ownership of `base_weight` follows the same two modes as
-    `LoRALinear`: supply it at construction to have this layer own and
-    freeze it, or omit it there and pass it to `__call__` instead to
-    share one base weight across many DoRA adapters (e.g. many low-rank
-    "virtual experts" built on a common base FFN or attention
-    projection).
-
     Attributes:
         in_features: Number of input features.
         out_features: Number of output features.
@@ -233,12 +213,6 @@ class DoRALinear(Module):
         >>> pretrained_w = jnp.load("layer_weight.npy")
         >>> layer = xl.DoRALinear(768, 768, rank=8, base_weight=pretrained_w, key=key)
         >>> output = layer(input_tensor)
-        >>>
-        >>> # Sharing one base weight across many DoRA "virtual experts":
-        >>> shared_base_up = jnp.zeros((768, 3072))
-        >>> experts = [xl.DoRALinear(768, 3072, rank=16, key=k) for k in keys]
-        >>> expert_outputs = [e(x, base_weight=shared_base_up) for e in experts]
-        >>> combined = sum(expert_outputs)  # additive combination, e.g. MoE-style
     """
 
     in_features: int
@@ -264,10 +238,6 @@ class DoRALinear(Module):
             # cancels the normalization).
             init_magnitude = jnp.linalg.norm(self.base_weight, axis=0)
         else:
-            # Shared base supplied only at call time -- fall back to a
-            # plain-ones start; the first call's column norms won't be
-            # known until then, so exact equivalence to base_weight at
-            # init isn't guaranteed in the shared-base case.
             init_magnitude = jnp.ones((self.out_features,))
         self.magnitude = param(self.rng(), lambda *_: init_magnitude, (self.out_features,))
         self.bias = (
