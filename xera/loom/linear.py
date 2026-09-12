@@ -28,7 +28,8 @@ class Linear(Module):
         use_bias: Whether to add a bias term (default: True).
     
     Example:
-        >>> layer = Linear(in_features=128, out_features=64)
+        >>> import xera.loom as xl
+        >>> layer = xl.Linear(in_features=128, out_features=64)
         >>> output = layer(input_tensor)  # shape: (..., 64)
     """
     
@@ -107,14 +108,15 @@ class LoRALinear(Module):
             the adaptation targets weight matrices).
 
     Example:
+        >>> import xera.loom as xl
         >>> # Adapting an owned, frozen pretrained weight:
         >>> pretrained_w = jnp.load("layer_weight.npy")
-        >>> layer = LoRALinear(768, 768, rank=8, base_weight=pretrained_w, key=key)
+        >>> layer = xl.LoRALinear(768, 768, rank=8, base_weight=pretrained_w, key=key)
         >>> output = layer(input_tensor)
         >>>
         >>> # Sharing one base weight across many low-rank adapters:
         >>> shared_base = jnp.zeros((768, 3072))
-        >>> experts = [LoRALinear(768, 3072, rank=8, key=k) for k in keys]
+        >>> experts = [xl.LoRALinear(768, 3072, rank=8, key=k) for k in keys]
         >>> outputs = [e(x, base_weight=shared_base) for e in experts]
     """
 
@@ -226,14 +228,15 @@ class DoRALinear(Module):
         use_bias: Whether to add a trainable bias term (default: False).
 
     Example:
+        >>> import xera.loom as xl
         >>> # Adapting an owned, frozen pretrained weight:
         >>> pretrained_w = jnp.load("layer_weight.npy")
-        >>> layer = DoRALinear(768, 768, rank=8, base_weight=pretrained_w, key=key)
+        >>> layer = xl.DoRALinear(768, 768, rank=8, base_weight=pretrained_w, key=key)
         >>> output = layer(input_tensor)
         >>>
         >>> # Sharing one base weight across many DoRA "virtual experts":
         >>> shared_base_up = jnp.zeros((768, 3072))
-        >>> experts = [DoRALinear(768, 3072, rank=16, key=k) for k in keys]
+        >>> experts = [xl.DoRALinear(768, 3072, rank=16, key=k) for k in keys]
         >>> expert_outputs = [e(x, base_weight=shared_base_up) for e in experts]
         >>> combined = sum(expert_outputs)  # additive combination, e.g. MoE-style
     """
