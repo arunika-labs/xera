@@ -26,7 +26,8 @@ class Dropout(Module):
         rate: Dropout probability (fraction of units to drop).
     
     Example:
-        >>> dropout = Dropout(rate=0.1)
+        >>> import xera.loom as xl
+        >>> dropout = xl.Dropout(rate=0.1)
         >>> output = dropout(input_tensor, key=dropout_key, deterministic=False)
     """
     
