@@ -17,10 +17,10 @@ pip install git+https://github.com/arunika-labs/xera.git
 
 ```python
 import jax
-import xera.loom as L
+import xera.loom as xl
 import jax.numpy as jnp
 
-model = L.Linear(4, 8, key=jax.random.PRNGKey(0))
+model = xl.Linear(4, 8, key=jax.random.PRNGKey(0))
 x = jnp.ones((2, 4))
 y = model(x)
 ```
@@ -34,8 +34,6 @@ import xera
 import xera.loom as xl              # layers / modules
 import xera.functional as F         # activations + attention + loss
 import xera.optimizer as xopt       # optimizers + training state
-
-xera.shard                          # device-sharding decorator, at the top level
 ```
 
 The full API reference — every layer, every training/optimizer/loss
