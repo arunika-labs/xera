@@ -136,9 +136,9 @@ def test_sgd_momentum_accumulates_across_steps():
     grads = {"w": jnp.array(1.0)}
 
     _, state1 = opt.update(grads, state, params)
-    m1 = state1.momentum["w"]
+    m1 = state1.momentum_buf["w"]
     _, state2 = opt.update(grads, state1, params)
-    m2 = state2.momentum["w"]
+    m2 = state2.momentum_buf["w"]
     # Momentum should keep growing under a constant gradient.
     assert float(m2) > float(m1)
 

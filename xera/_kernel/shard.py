@@ -167,7 +167,7 @@ def shard(*specs, **kwspecs):
 
     Example:
         >>> @jax.jit
-        ... @xera.shard(P('data', None), P(None, 'model'))
+        ... @shard(P('data', None), P(None, 'model'))
         ... def forward(x, w):
         ...     return x @ w
     """

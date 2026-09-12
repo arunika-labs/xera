@@ -47,12 +47,14 @@ def test_clip_leaves_small_grads_unchanged():
 
 
 def test_clip_delegates_init_to_inner():
+    # Clip now wraps its own `threshold` leaf on top -- the wrapped
+    # `inner_state` itself is exactly what the inner optimizer produces.
     inner = Adam(lr=0.1)
     opt = Clip(threshold=1.0)(inner)
     params = {"w": jnp.ones((3,))}
     state = opt.init(params)
     inner_state = inner.init(params)
-    assert type(state) is type(inner_state)
+    assert type(state.inner_state) is type(inner_state)
 
 
 def test_clip_composes_with_other_optimizers():
@@ -206,16 +208,21 @@ def test_accumulate_jit_compatible():
 def test_weight_decay_infers_lr_from_inner():
     inner = Adam(lr=0.1)
     opt = WeightDecay(rate=0.1)(inner)
-    assert opt.lr == pytest.approx(0.1)
+    params = {"w": jnp.ones((3,))}
+    state = opt.init(params)
+    grads = {"w": jnp.zeros((3,))}
+    # With zero grads Adam's own update direction is ~0, so any nonzero
+    # shrinkage in `updates` must come from weight decay using inner's
+    # actual lr (0.1), confirming it's read from inner's state -- not a
+    # separately-configured value.
+    updates, _ = opt.update(grads, state, params)
+    assert jnp.allclose(updates["w"], -0.1 * 0.1 * params["w"], atol=1e-5)
 
 
 def test_weight_decay_explicit_lr_overrides_inference():
-    inner = Adam(lr=0.1)
-    opt = WeightDecay(rate=0.1, lr=0.5)(inner)
-    assert opt.lr == pytest.approx(0.5)
-
-
-def test_weight_decay_raises_when_no_lr_found():
+    # Explicit lr= is only ever a *fallback*, used when the inner optimizer
+    # has no `lr` leaf at all -- with a real inner optimizer (which does
+    # have one), its actual lr wins over the fallback.
     class NoLrOptimizer:
         def init(self, params):
             return None
@@ -223,8 +230,33 @@ def test_weight_decay_raises_when_no_lr_found():
         def update(self, grads, state, params=None, step=None):
             return grads, state
 
+    opt = WeightDecay(rate=0.1, lr=0.5)(NoLrOptimizer())
+    params = {"w": jnp.array([2.0])}
+    state = opt.init(params)
+    grads = {"w": jnp.array([0.0])}
+    updates, _ = opt.update(grads, state, params)
+    # updates = 0 - lr*rate*p = -0.5*0.1*2.0 = -0.1
+    assert jnp.allclose(updates["w"], -0.1)
+
+
+def test_weight_decay_raises_when_no_lr_found():
+    # No lr can be found until the state chain actually exists (i.e. until
+    # init()/update() run), so -- unlike the old, object-graph-based
+    # lookup -- this can only raise once an update is attempted, not at
+    # wrap time.
+    class NoLrOptimizer:
+        def init(self, params):
+            return None
+
+        def update(self, grads, state, params=None, step=None):
+            return grads, state
+
+    opt = WeightDecay(rate=0.1)(NoLrOptimizer())
+    params = {"w": jnp.array([2.0])}
+    state = opt.init(params)
+    grads = {"w": jnp.array([0.0])}
     with pytest.raises(TypeError):
-        WeightDecay(rate=0.1)(NoLrOptimizer())
+        opt.update(grads, state, params)
 
 
 def test_weight_decay_adds_extra_shrinkage_to_updates():
@@ -250,12 +282,14 @@ def test_weight_decay_zero_rate_is_no_op():
 
 
 def test_weight_decay_delegates_init_to_inner():
+    # WeightDecay only adds its own `rate` leaf on top -- the wrapped
+    # `inner_state` itself is exactly what the inner optimizer produces.
     inner = Adam(lr=0.1)
     opt = WeightDecay(rate=0.1)(inner)
     params = {"w": jnp.ones((3,))}
     state = opt.init(params)
     inner_state = inner.init(params)
-    assert type(state) is type(inner_state)
+    assert type(state.inner_state) is type(inner_state)
 
 
 # ---------------------------------------------------------------------------

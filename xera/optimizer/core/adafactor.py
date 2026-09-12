@@ -4,11 +4,16 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 import jax
 import jax.numpy as jnp
-from ..base import Optimizer, _tree_map
+from ..base import Optimizer, _tree_map, _as_hyper
 
 
 class AdafactorState(NamedTuple):
     step: jnp.ndarray
+    lr: jnp.ndarray
+    decay: jnp.ndarray
+    eps: jnp.ndarray
+    clip_threshold: jnp.ndarray  # only used if enabled at construction
+    weight_decay: jnp.ndarray
     v_row: Any   # per-leaf: row factor (shape (m,)) for 2D leaves, else None marker unused
     v_col: Any   # per-leaf: col factor (shape (n,)) for 2D leaves
     v_full: Any  # per-leaf: full second moment for non-2D leaves
@@ -27,6 +32,9 @@ class Adafactor(Optimizer):
     lr: float = None
     decay: float = 0.8
     eps: float = 1e-30
+    # Whether clipping happens at all is structural (`self.clip_threshold
+    # is not None`, decided once at construction); the threshold *value*
+    # when enabled is an ordinary dynamic leaf (state.clip_threshold).
     clip_threshold: float = 1.0
     weight_decay: float = 0.0
 
@@ -47,28 +55,32 @@ class Adafactor(Optimizer):
             fulls.append(f)
         return AdafactorState(
             step=jnp.zeros([], jnp.int32),
+            lr=_as_hyper(self.lr), decay=_as_hyper(self.decay), eps=_as_hyper(self.eps),
+            clip_threshold=_as_hyper(
+                self.clip_threshold if self.clip_threshold is not None else 0.0
+            ),
+            weight_decay=_as_hyper(self.weight_decay),
             v_row=jax.tree_util.tree_unflatten(treedef, rows),
             v_col=jax.tree_util.tree_unflatten(treedef, cols),
             v_full=jax.tree_util.tree_unflatten(treedef, fulls),
         )
 
-    def _leaf_update(self, g, v_row, v_col, v_full, p):
-        decay = self.decay
+    def _leaf_update(self, g, v_row, v_col, v_full, p, decay, eps, clip_threshold, lr, weight_decay):
         if g.ndim == 2:
-            row_mean = jnp.mean(jnp.square(g), axis=1) + self.eps
-            col_mean = jnp.mean(jnp.square(g), axis=0) + self.eps
+            row_mean = jnp.mean(jnp.square(g), axis=1) + eps
+            col_mean = jnp.mean(jnp.square(g), axis=0) + eps
             new_v_row = decay * v_row + (1 - decay) * row_mean
             new_v_col = decay * v_col + (1 - decay) * col_mean
             # Rank-1 reconstruction of the full second-moment estimate from
             # the row/column factors (the whole point of factoring).
             r = new_v_row / jnp.mean(new_v_row)
             approx_v = jnp.outer(r, new_v_col)
-            denom = jnp.sqrt(approx_v) + self.eps
+            denom = jnp.sqrt(approx_v) + eps
             direction = g / denom
             new_v_full = v_full  # unused arm stays as-is
         else:
             new_v_full = decay * v_full + (1 - decay) * jnp.square(g)
-            denom = jnp.sqrt(new_v_full) + self.eps
+            denom = jnp.sqrt(new_v_full) + eps
             direction = g / denom
             new_v_row, new_v_col = v_row, v_col
 
@@ -77,15 +89,18 @@ class Adafactor(Optimizer):
         # second-moment estimates from producing huge steps.
         if self.clip_threshold is not None:
             rms = jnp.sqrt(jnp.mean(jnp.square(direction)))
-            direction = direction / jnp.maximum(1.0, rms / self.clip_threshold)
+            direction = direction / jnp.maximum(1.0, rms / clip_threshold)
 
-        update = -self.lr * direction
-        if self.weight_decay and p is not None:
-            update = update - self.lr * self.weight_decay * p
+        update = -lr * direction
+        if p is not None:
+            update = update - lr * weight_decay * p
 
         return update, new_v_row, new_v_col, new_v_full
 
     def update(self, grads, state, params=None, step=None):
+        lr, decay, eps = state.lr, state.decay, state.eps
+        clip_threshold, weight_decay = state.clip_threshold, state.weight_decay
+
         leaves_g, treedef = jax.tree_util.tree_flatten(grads)
         leaves_vr = treedef.flatten_up_to(state.v_row)
         leaves_vc = treedef.flatten_up_to(state.v_col)
@@ -97,7 +112,9 @@ class Adafactor(Optimizer):
 
         out_u, out_vr, out_vc, out_vf = [], [], [], []
         for g, vr, vc, vf, p in zip(leaves_g, leaves_vr, leaves_vc, leaves_vf, leaves_p):
-            u, nvr, nvc, nvf = self._leaf_update(g, vr, vc, vf, p)
+            u, nvr, nvc, nvf = self._leaf_update(
+                g, vr, vc, vf, p, decay, eps, clip_threshold, lr, weight_decay
+            )
             out_u.append(u)
             out_vr.append(nvr)
             out_vc.append(nvc)
@@ -105,7 +122,8 @@ class Adafactor(Optimizer):
 
         updates = jax.tree_util.tree_unflatten(treedef, out_u)
         return updates, AdafactorState(
-            step=state.step + 1,
+            step=state.step + 1, lr=lr, decay=decay, eps=eps,
+            clip_threshold=clip_threshold, weight_decay=weight_decay,
             v_row=jax.tree_util.tree_unflatten(treedef, out_vr),
             v_col=jax.tree_util.tree_unflatten(treedef, out_vc),
             v_full=jax.tree_util.tree_unflatten(treedef, out_vf),

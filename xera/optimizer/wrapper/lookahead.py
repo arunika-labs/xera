@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 import jax
 import jax.numpy as jnp
-from ..base import Optimizer, _tree_map
+from ..base import Optimizer, _tree_map, _as_hyper
 from ..state import State
 
 
@@ -15,8 +15,6 @@ class Lookahead(State):
 
     def setup(self):
         assert self.k >= 1, "Lookahead(k=...) needs k >= 1"
-        self.k = int(self.k)
-        self.alpha = float(self.alpha)
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _Lookahead(inner, self.k, self.alpha)
@@ -26,6 +24,8 @@ class _LookaheadState(NamedTuple):
     inner_state: Any
     slow: Any
     count: jnp.ndarray
+    k: jnp.ndarray
+    alpha: jnp.ndarray
 
 
 class _Lookahead(Optimizer):
@@ -38,6 +38,8 @@ class _Lookahead(Optimizer):
             inner_state=self.inner.init(params),
             slow=params,
             count=jnp.zeros([], jnp.int32),
+            k=_as_hyper(self.k),
+            alpha=_as_hyper(self.alpha),
         )
 
     def update(self, grads, state, params=None, step=None):
@@ -47,20 +49,20 @@ class _Lookahead(Optimizer):
                 "fast/slow interpolation -- pass params to update()."
             )
 
+        k, alpha = state.k, state.alpha
+
         fast_updates, new_inner = self.inner.update(grads, state.inner_state, params, step)
         fast_params = _tree_map(lambda p, u: p + u, params, fast_updates)
 
         count = state.count + 1
         if step is None:
-            should_sync = (count % self.k) == 0
+            should_sync = (count % k) == 0
         else:
-            should_sync = ((jnp.asarray(step) + 1) % self.k) == 0
+            should_sync = ((jnp.asarray(step) + 1) % k) == 0
 
         def _sync(operand):
             slow_, fast_ = operand
-            new_slow = _tree_map(
-                lambda s, f: s + self.alpha * (f - s), slow_, fast_
-            )
+            new_slow = _tree_map(lambda s, f: s + alpha * (f - s), slow_, fast_)
             return new_slow, new_slow  # fast resets to the newly-synced slow point
 
         def _no_sync(operand):
@@ -77,7 +79,7 @@ class _Lookahead(Optimizer):
         updates = _tree_map(lambda nf, p: nf - p, new_fast, params)
 
         return updates, _LookaheadState(
-            inner_state=new_inner, slow=new_slow, count=count
+            inner_state=new_inner, slow=new_slow, count=count, k=k, alpha=alpha,
         )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 import jax
 import jax.numpy as jnp
-from ..base import Optimizer, _tree_map
+from ..base import Optimizer, _tree_map, _as_hyper
 from ..state import State
 
 
@@ -14,7 +14,6 @@ class Accumulate(State):
 
     def setup(self):
         assert self.steps >= 1, "Accumulate(steps) needs steps >= 1"
-        self.steps = int(self.steps)
 
     def __call__(self, inner: Optimizer) -> Optimizer:
         return _Accumulated(inner, self.steps)
@@ -24,6 +23,7 @@ class _AccumulatedState(NamedTuple):
     inner_state: Any
     buf: Any
     count: jnp.ndarray
+    steps: jnp.ndarray
 
 
 class _Accumulated(Optimizer):
@@ -36,23 +36,25 @@ class _Accumulated(Optimizer):
             inner_state=self.inner.init(params),
             buf=buf,
             count=jnp.zeros([], jnp.int32),
+            steps=_as_hyper(self.steps),
         )
 
     def update(self, grads, state, params=None, step=None):
+        steps = state.steps
         buf = _tree_map(jnp.add, state.buf, grads)
         count = state.count + 1
 
         if step is None:
-            should_apply = (count % self.steps) == 0
+            should_apply = (count % steps) == 0
         else:
-            should_apply = ((jnp.asarray(step) + 1) % self.steps) == 0
+            should_apply = ((jnp.asarray(step) + 1) % steps) == 0
 
         def _apply(operand):
             buf_, inner_state_ = operand
             # Average over the window so the wrapped optimizer sees a
             # gradient at the same scale as an un-accumulated micro-step
             # gradient, not one that's `steps` times too large.
-            avg = _tree_map(lambda b: b / self.steps, buf_)
+            avg = _tree_map(lambda b: b / steps, buf_)
             updates_, new_inner_state_ = self.inner.update(
                 avg, inner_state_, params, step
             )
@@ -73,7 +75,7 @@ class _Accumulated(Optimizer):
         )
 
         return updates, _AccumulatedState(
-            inner_state=new_inner_state, buf=new_buf, count=count
+            inner_state=new_inner_state, buf=new_buf, count=count, steps=steps,
         )
 
 
