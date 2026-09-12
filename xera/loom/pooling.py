@@ -42,7 +42,8 @@ class MaxPool(Module):
         padding: Padding mode: "VALID" (no padding) or "SAME" (padding to maintain size).
     
     Example:
-        >>> pool = MaxPool(pool_size=(2, 2), stride=(2, 2), padding="VALID")
+        >> import xera.loom as xl
+        >>> pool = xl.MaxPool(pool_size=(2, 2), stride=(2, 2), padding="VALID")
         >>> output = pool(input_tensor)  # Halves spatial dimensions
     """
 
@@ -84,7 +85,8 @@ class AvgPool(Module):
         padding: Padding mode: "VALID" (no padding) or "SAME" (padding to maintain size).
     
     Example:
-        >>> pool = AvgPool(pool_size=(2, 2), stride=(2, 2), padding="VALID")
+        >>> import xera.loom as xl
+        >>> pool = xl.AvgPool(pool_size=(2, 2), stride=(2, 2), padding="VALID")
         >>> output = pool(input_tensor)  # Halves spatial dimensions
     """
 
@@ -130,7 +132,8 @@ class GlobalAvgPool(Module):
             If False, removes the reduced dimensions.
     
     Example:
-        >>> pool = GlobalAvgPool(keepdims=False)
+        >>> import xera.loom as xl
+        >>> pool = xl.GlobalAvgPool(keepdims=False)
         >>> output = pool(input_tensor)  # Shape: (batch, channels)
     """
 
