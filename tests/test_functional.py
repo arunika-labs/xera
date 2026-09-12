@@ -6,7 +6,7 @@ import jax
 import jax.nn as jnn
 import jax.numpy as jnp
 import pytest
-import xera.functional as xf
+import xera.functional as F
 
 
 ACTIVATION_NAMES = [
@@ -39,60 +39,60 @@ ACTIVATION_NAMES = [
 
 def test_all_activations_exposed_on_functional():
     for name in ACTIVATION_NAMES:
-        assert hasattr(xf, name), f"xera.functional is missing '{name}'"
+        assert hasattr(F, name), f"xera.functional is missing '{name}'"
 
 
 def test_glu_and_one_hot_exposed_on_functional():
-    assert hasattr(xf, "glu")
-    assert hasattr(xf, "one_hot")
+    assert hasattr(F, "glu")
+    assert hasattr(F, "one_hot")
 
 
 def test_flash_sdpa_exposed_on_functional():
-    assert hasattr(xf, "flash_sdpa")
+    assert hasattr(F, "flash_sdpa")
 
 
 @pytest.mark.parametrize("name", ACTIVATION_NAMES)
 def test_activation_is_identical_to_jax_nn(name):
     # These are re-exports, not reimplementations: identity check, not just
     # numerical closeness.
-    assert getattr(xf, name) is getattr(jnn, name)
+    assert getattr(F, name) is getattr(jnn, name)
 
 
 @pytest.mark.parametrize("name", ACTIVATION_NAMES)
 def test_activation_matches_jax_nn_output(name):
     x = jax.random.normal(jax.random.PRNGKey(0), (16,))
-    xf_fn = getattr(xf, name)
+    F_fn = getattr(F, name)
     jnn_fn = getattr(jnn, name)
-    assert jnp.array_equal(xf_fn(x), jnn_fn(x))
+    assert jnp.array_equal(F_fn(x), jnn_fn(x))
 
 
 def test_relu_zeroes_negatives():
     x = jnp.array([-2.0, -0.5, 0.0, 0.5, 2.0])
-    out = xf.relu(x)
+    out = F.relu(x)
     assert jnp.array_equal(out, jnp.array([0.0, 0.0, 0.0, 0.5, 2.0]))
 
 
 def test_sigmoid_output_range():
     x = jax.random.normal(jax.random.PRNGKey(0), (100,))
-    out = xf.sigmoid(x)
+    out = F.sigmoid(x)
     assert jnp.all(out > 0.0) and jnp.all(out < 1.0)
 
 
 def test_softmax_sums_to_one():
     x = jax.random.normal(jax.random.PRNGKey(0), (10,))
-    out = xf.softmax(x)
+    out = F.softmax(x)
     assert jnp.isclose(jnp.sum(out), 1.0, atol=1e-5)
 
 
 def test_tanh_output_range():
     x = jax.random.normal(jax.random.PRNGKey(0), (100,))
-    out = xf.tanh(x)
+    out = F.tanh(x)
     assert jnp.all(out > -1.0) and jnp.all(out < 1.0)
 
 
 def test_one_hot_basic():
     labels = jnp.array([0, 2, 1])
-    out = xf.one_hot(labels, num_classes=3)
+    out = F.one_hot(labels, num_classes=3)
     expected = jnp.array(
         [
             [1.0, 0.0, 0.0],
