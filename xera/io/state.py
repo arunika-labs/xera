@@ -39,7 +39,8 @@ def save_state(state, path):
 
     Example:
         >>> import xera
-        >>> opt = xera.optimizer.Adam(lr=1e-3)
+        >>> import xera.optimizer as xopt
+        >>> opt = xopt.Adam(lr=1e-3)
         >>> state = opt.init(params)
         >>> ...  # train for a while
         >>> xera.io.save_state(state, "opt_state.safetensors")
@@ -74,7 +75,8 @@ def load_state(template, path):
 
     Example:
         >>> import xera
-        >>> opt = xera.optimizer.Adam(lr=1e-3)  # lr= here is only a
+        >>> import xera.optimizer as xopt
+        >>> opt = xopt.Adam(lr=1e-3)  # lr= here is only a
         ...                                     # placeholder; the loaded
         ...                                     # checkpoint's lr wins
         >>> state = xera.io.load_state(opt.init(params), "opt_state.safetensors")
