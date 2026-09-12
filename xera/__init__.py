@@ -1,7 +1,8 @@
 from . import functional
 from . import loom
-from . import weave
+from . import optimizer
 from . import io
+from ._kernel.shard import shard
 
 from importlib.metadata import version, PackageNotFoundError
 
@@ -13,6 +14,7 @@ except PackageNotFoundError:
 __all__ = [
     "functional",
     "loom",
-    "weave",
+    "optimizer",
     "io",
+    "shard",
 ]

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 from ..base import Optimizer, _tree_map
-from ...struct import Struct
+from ..state import State
 
 
-class Cast(Struct):
+class Cast(State):
 
     grad_dtype: object = None
     update_dtype: object = None

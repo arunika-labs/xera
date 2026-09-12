@@ -5,10 +5,10 @@ from typing import NamedTuple, Any
 import jax
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
-from ...struct import Struct
+from ..state import State
 
 
-class Accumulate(Struct):
+class Accumulate(State):
 
     steps: int = None
 

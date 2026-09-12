@@ -12,6 +12,18 @@ Currently contains:
     - `flash_attention/` -- flash attention backend dispatch
       (`flash_sdpa`), with the cuDNN/splash/portable-jax kernels behind
       it all private. See `xera._kernel.flash_attention` for details.
+      Its public seam is `xera.functional.flash_sdpa`.
+    - `shard.py` -- the device-sharding decorator (`shard`). Unlike
+      `flash_attention`, its public seam is re-exported directly at
+      the top level as `xera.shard`, since sharding cuts across
+      `loom`, `functional`, and `optimizer` rather than belonging to
+      one of them.
 """
 
 from __future__ import annotations
+
+from .shard import shard
+
+__all__ = [
+    "shard",
+]

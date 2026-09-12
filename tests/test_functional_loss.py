@@ -1,9 +1,9 @@
-"""Tests for xera.weave.loss: Loss collection of loss functions."""
+"""Tests for xera.functional.loss: Loss collection of loss functions."""
 
 import jax
 import jax.numpy as jnp
-import xera.weave as weave
-from xera.weave.loss import Loss
+import xera.functional as functional
+from xera.functional.loss import Loss
 
 
 def test_l1_matches_manual_mae():
@@ -293,5 +293,5 @@ def test_loss_is_differentiable_via_grad():
     assert not jnp.allclose(grads, jnp.zeros_like(grads))
 
 
-def test_loss_accessible_from_weave_namespace():
-    assert weave.Loss is Loss
+def test_loss_accessible_from_functional_namespace():
+    assert functional.Loss is Loss

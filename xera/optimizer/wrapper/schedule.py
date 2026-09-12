@@ -4,10 +4,10 @@ from __future__ import annotations
 from typing import NamedTuple, Any, Callable
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
-from ...struct import Struct
+from ..state import State
 
 
-class Schedule(Struct):
+class Schedule(State):
 
     fn: Callable[[jnp.ndarray], jnp.ndarray] = None
 

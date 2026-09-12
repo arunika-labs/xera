@@ -1,22 +1,22 @@
-"""Tests for xera.weave.optimizer.wrapper: Clip, Schedule, Accumulate,
+"""Tests for xera.optimizer.wrapper: Clip, Schedule, Accumulate,
 WeightDecay, EMA, Freeze, Lookahead, Cast."""
 
 import jax
 import jax.numpy as jnp
 import pytest
-import xera.weave as weave
-from xera.weave.optimizer.core.sgd import SGDMomentum
-from xera.weave.optimizer.core.adam import Adam, AdamW
-from xera.weave.optimizer.base import apply_updates
-from xera.weave.optimizer.partition import Partition
-from xera.weave.optimizer.wrapper.clip import Clip
-from xera.weave.optimizer.wrapper.schedule import Schedule
-from xera.weave.optimizer.wrapper.accumulate import Accumulate
-from xera.weave.optimizer.wrapper.weight_decay import WeightDecay
-from xera.weave.optimizer.wrapper.ema import EMA
-from xera.weave.optimizer.wrapper.freeze import Freeze
-from xera.weave.optimizer.wrapper.lookahead import Lookahead
-from xera.weave.optimizer.wrapper.cast import Cast
+import xera.optimizer as optimizer
+from xera.optimizer.core.sgd import SGDMomentum
+from xera.optimizer.core.adam import Adam, AdamW
+from xera.optimizer.base import apply_updates
+from xera.optimizer.partition import Partition
+from xera.optimizer.wrapper.clip import Clip
+from xera.optimizer.wrapper.schedule import Schedule
+from xera.optimizer.wrapper.accumulate import Accumulate
+from xera.optimizer.wrapper.weight_decay import WeightDecay
+from xera.optimizer.wrapper.ema import EMA
+from xera.optimizer.wrapper.freeze import Freeze
+from xera.optimizer.wrapper.lookahead import Lookahead
+from xera.optimizer.wrapper.cast import Cast
 
 
 # ---------------------------------------------------------------------------
@@ -470,10 +470,10 @@ def test_multiple_wrappers_compose_and_reduce_loss():
 
 
 # ---------------------------------------------------------------------------
-# Exposure from xera.weave namespace
+# Exposure from xera.optimizer namespace
 # ---------------------------------------------------------------------------
 
-def test_all_wrappers_exposed_on_weave():
+def test_all_wrappers_exposed_on_optimizer_namespace():
     for name in ["Clip", "Schedule", "Accumulate", "WeightDecay", "EMA",
                  "Freeze", "Lookahead", "Cast"]:
-        assert hasattr(weave, name)
+        assert hasattr(optimizer, name)

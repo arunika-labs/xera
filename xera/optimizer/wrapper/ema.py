@@ -4,10 +4,10 @@ from __future__ import annotations
 from typing import NamedTuple, Any
 import jax.numpy as jnp
 from ..base import Optimizer, _tree_map
-from ...struct import Struct
+from ..state import State
 
 
-class EMA(Struct):
+class EMA(State):
 
     decay: float = 0.999
     warmup_steps: int = 0

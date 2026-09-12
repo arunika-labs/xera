@@ -6,6 +6,10 @@ Loss functions module for JAX-based neural network training.
 This module provides a comprehensive collection of loss functions commonly
 used in machine learning, including regression losses, classification losses,
 and specialized losses for specific tasks.
+
+Lives under `xera.functional` (moved from the old `xera.weave` package)
+alongside activations and attention -- `Loss` is a plain functional
+namespace, same as the rest of `xera.functional`.
 """
 
 from __future__ import annotations

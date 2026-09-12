@@ -1,5 +1,6 @@
 
 
+from .state import State
 from .base import Optimizer, apply_updates
 from .partition import Partition
 from .core import (
@@ -27,6 +28,7 @@ from .wrapper import (
 )
 
 __all__ = [
+    "State",
     "Optimizer",
     "apply_updates",
     "Partition",

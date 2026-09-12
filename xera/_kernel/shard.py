@@ -1,12 +1,15 @@
 """
 Shard module: automatic device-sharding decorator for JAX functions.
 
-Everything else in `xera.weave` assumes a single logical device: the
-training loop, the optimizers, the callbacks. `shard` is the one piece
-concerned with *where* an array's data actually lives across multiple
-devices -- it exists so a function can declare its sharding intent
-inline, without the caller having to construct a `Mesh` by hand
-somewhere else in the script.
+`shard` is the one piece of `xera` concerned with *where* an array's
+data actually lives across multiple devices -- it exists so a function
+can declare its sharding intent inline, without the caller having to
+construct a `Mesh` by hand somewhere else in the script.
+
+Lives under `xera._kernel` (implementation detail, not itself a public
+subpackage) and is re-exported directly at the top level as
+`xera.shard`, since sharding is a cross-cutting concern rather than
+something scoped to `loom`, `functional`, or `optimizer`.
 
 `shard` wraps `jax.device_put` + `jax.sharding.NamedSharding`. Given a
 `jax.sharding.PartitionSpec` per argument, it:
@@ -26,11 +29,11 @@ somewhere else in the script.
 
 Example:
     >>> import jax
+    >>> import xera
     >>> from jax.sharding import PartitionSpec as P
-    >>> from xera.weave import shard
     >>>
     >>> @jax.jit
-    ... @shard(P('data', None), P(None, 'model'))
+    ... @xera.shard(P('data', None), P(None, 'model'))
     ... def forward(x, w):
     ...     return x @ w
 
@@ -102,7 +105,7 @@ def _build_mesh(axis_names, devices):
 
     if int(np.prod(shape)) != n:
         raise ValueError(
-            f"[xera.weave.shard] Failed to build mesh: device count "
+            f"[xera.shard] Failed to build mesh: device count "
             f"({n}) cannot be evenly reshaped into {shape} for axes "
             f"{axis_names}."
         )
@@ -126,7 +129,7 @@ def _safe_device_put(array, mesh, spec, fn_name, arg_label):
         return jax.device_put(array, NamedSharding(mesh, spec))
     except Exception as e:  # noqa: BLE001 - intentionally broad, re-raised clearly
         raise ValueError(
-            f"[xera.weave.shard] Failed to shard {arg_label} in "
+            f"[xera.shard] Failed to shard {arg_label} in "
             f"function '{fn_name}': shape {getattr(array, 'shape', '?')} "
             f"does not evenly divide according to spec {spec} on mesh "
             f"{mesh}. Make sure every sharded dimension size is evenly "
@@ -180,7 +183,7 @@ def shard(*specs, **kwspecs):
             if n_devices <= 1:
                 if not _warned_single_device:
                     warnings.warn(
-                        f"[xera.weave.shard] Only {n_devices} device "
+                        f"[xera.shard] Only {n_devices} device "
                         f"detected ({devices}). Sharding is skipped, "
                         f"function '{fn.__name__}' runs without "
                         f"sharding.",

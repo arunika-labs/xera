@@ -1,11 +1,12 @@
 """
-Base abstraction for `weave` training-side components.
+Base abstraction for `xera.optimizer` training-side components.
 
-Defines `Struct`, the training-side counterpart to `loom.Module`.
+Defines `State`, the training-side counterpart to `loom.Module`.
 
-Moved out of the old shared `xera.core` module -- `Struct` is used
-exclusively by `weave` (optimizers, training loops, and the like), so
-it lives here now instead of in a cross-cutting "core" module.
+Moved out of the old shared `xera.core` module, then out of the old
+`xera.weave` package -- `State` is used exclusively by `optimizer`
+(optimizers, training loops, and the like), so it lives here now
+instead of in a cross-cutting "core" or "weave" module.
 """
 
 from __future__ import annotations
@@ -15,21 +16,21 @@ import jax.numpy as jnp
 from .._rng import RNGPool
 
 
-class Struct:
+class State:
     """
     Base class for training-state components in the xera framework.
 
-    Struct is the training-side counterpart to `Module`: same mechanics
+    State is the training-side counterpart to `Module`: same mechanics
     (dataclass fields, keyed JAX pytree registration, an optional
     `setup()` hook, optional `self.rng()`), but meant for things that
     drive or observe training rather than for differentiable model
     parameters. Use it for datasets, parallel/sharding wrappers,
     optimizers, train steps, and the top-level training driver -- all
-    as plain `Struct` subclasses, composed by holding each other (and
+    as plain `State` subclasses, composed by holding each other (and
     `Module` instances) as fields.
 
     Example:
-        >>> class Datasets(Struct):
+        >>> class Datasets(State):
         ...     x: jnp.ndarray = None
         ...     y: jnp.ndarray = None
         ...
@@ -37,7 +38,7 @@ class Struct:
         ...         noise = jax.random.normal(self.rng(), self.x.shape)
         ...         return self.x + 0.01 * noise
         ...
-        >>> class Trainer(Struct):
+        >>> class Trainer(State):
         ...     model: Module = None
         ...     data: Datasets = None
         ...     optimizer: "Optimizer" = None
@@ -78,8 +79,8 @@ class Struct:
 
         After field assignment, calls `self.setup()`, and then -- if the
         subclass defines its own `run()` (i.e. it's not just the no-op
-        base `Struct.run`) -- calls `self.run()` too. This is what lets a
-        `Trainer(Struct)` with a `run()` method start training simply by
+        base `State.run`) -- calls `self.run()` too. This is what lets a
+        `Trainer(State)` with a `run()` method start training simply by
         being instantiated: `Trainer(key=k, ...)`.
 
         Args:
@@ -103,7 +104,7 @@ class Struct:
 
         self.setup()
 
-        if type(self).run is not Struct.run:
+        if type(self).run is not State.run:
             self.run()
 
     def setup(self):
@@ -130,12 +131,12 @@ class Struct:
         right after `setup()`, so instantiating the struct is enough to
         start it -- no separate `.run()` call needed:
 
-            >>> class Trainer(Struct):
+            >>> class Trainer(State):
             ...     def setup(self):
             ...         self.model = MyModel(key=self.rng())
             ...         self.optimizer = Adam(lr=1e-3)
             ...     def run(self):
-            ...         ...  # define body_fn, call weave.loop(...), etc.
+            ...         ...  # define body_fn, call optimizer.loop(...), etc.
             ...
             >>> trainer = Trainer(key=jax.random.PRNGKey(0))  # setup() then run()
 
@@ -165,7 +166,7 @@ class Struct:
         pool = getattr(self, "_rng_pool", None)
         if pool is None:
             raise RuntimeError(
-                "self.rng() dipanggil tapi Struct ini dibuat tanpa `key=`."
+                "self.rng() dipanggil tapi State ini dibuat tanpa `key=`."
             )
         return pool.split(n) if n is not None else pool.next()
 
@@ -174,23 +175,23 @@ class Struct:
         """
         Decide whether a field value belongs in the dynamic pytree part.
 
-        Dynamic: JAX arrays, `Module`/`Struct` instances (and `None`),
+        Dynamic: JAX arrays, `Module`/`State` instances (and `None`),
         plus `list`/`dict` values whose elements are all `Module` and/or
-        `Struct` instances (mirrors the list-of-Module exception in
+        `State` instances (mirrors the list-of-Module exception in
         `Module._tree_flatten`, extended to `dict` per design decision).
         Everything else (plain config, callables, hyperparameters) is
         static.
         """
         from ..loom.module import Module
 
-        if isinstance(val, (jnp.ndarray, Module, Struct)) or val is None:
+        if isinstance(val, (jnp.ndarray, Module, State)) or val is None:
             return True
         if isinstance(val, list) and val and all(
-            isinstance(v, (Module, Struct)) for v in val
+            isinstance(v, (Module, State)) for v in val
         ):
             return True
         if isinstance(val, dict) and val and all(
-            isinstance(v, (Module, Struct)) for v in val.values()
+            isinstance(v, (Module, State)) for v in val.values()
         ):
             return True
         return False
@@ -277,4 +278,4 @@ class Struct:
         return f"{type(self).__name__}({parts})"
 
 
-__all__ = ["Struct"]
+__all__ = ["State"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from ..base import Optimizer, _tree_map
-from ...struct import Struct
+from ..state import State
 
 
 def _find_lr(opt):
@@ -17,7 +17,7 @@ def _find_lr(opt):
     return None
 
 
-class WeightDecay(Struct):
+class WeightDecay(State):
 
     rate: float = None
     lr: float = None

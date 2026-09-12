@@ -1,10 +1,10 @@
 """
-Small internal RNG utility shared by `loom.Module` and `weave.Struct`.
+Small internal RNG utility shared by `loom.Module` and `optimizer.State`.
 
 This is intentionally not a "core" abstractions module -- it holds
-exactly one thing (`RNGPool`) that both `Module` and `Struct` need for
+exactly one thing (`RNGPool`) that both `Module` and `State` need for
 their `self.rng()` helper, with no dependency in either direction
-between `loom` and `weave`.
+between `loom` and `optimizer`.
 """
 
 from __future__ import annotations

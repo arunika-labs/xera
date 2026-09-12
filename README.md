@@ -30,11 +30,12 @@ y = model(x)
 Everything lives under a few short aliases off the `xera` top level:
 
 ```python
-import xera.loom as L               # layers / modules
-import xera.loom.functional as F    # activations + functional ops
-import xera.weave as W              # training loop, loss, callbacks, sharding
-import xera.weave.optimizer as O    # optimizers
-import xera.serialize as S          # save / load (safetensors)
+import xera
+import xera.loom as xl              # layers / modules
+import xera.functional as F         # activations + attention + loss
+import xera.optimizer as xopt       # optimizers + training state
+
+xera.shard                          # device-sharding decorator, at the top level
 ```
 
 The full API reference — every layer, every training/optimizer/loss

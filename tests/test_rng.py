@@ -1,5 +1,5 @@
 """Tests for xera._rng.RNGPool, the small RNG utility shared by
-xera.loom.Module and xera.weave.Struct.
+xera.loom.Module and xera.optimizer.State.
 """
 
 import jax
@@ -19,11 +19,11 @@ def test_rng_pool_split_returns_independent_keys():
     assert not jnp.array_equal(keys[0], keys[1])
 
 
-def test_rng_pool_is_exposed_on_loom_and_weave():
+def test_rng_pool_is_exposed_on_loom_and_optimizer():
     import xera.loom as xl
-    import xera.weave as weave
+    import xera.optimizer as optimizer
 
     assert xl.RNGPool is RNGPool
-    # weave.Struct uses the same RNGPool internally; not necessarily
-    # re-exported from xera.weave's public API, so just check Struct works.
-    assert hasattr(weave, "Struct")
+    # optimizer.State uses the same RNGPool internally; not necessarily
+    # re-exported from xera.optimizer's public API, so just check State works.
+    assert hasattr(optimizer, "State")

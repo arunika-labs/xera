@@ -1,19 +1,23 @@
 """
-Functional API: activations + attention.
+Functional API: activations + attention + loss.
 
 Mirrors `jax.nn`'s shape as a single namespace that mixes thin aliases
 (`activations.py`, re-exporting `jax.nn`'s activation functions) with
-original implementations (`attention.py`, re-exporting `flash_sdpa`) --
-same as `jax.nn` mixes `jax.nn.relu` (alias) with
-`jax.nn.dot_product_attention` (original implementation).
+original implementations (`attention.py`, re-exporting `flash_sdpa`,
+and `loss.py`, providing `Loss`) -- same as `jax.nn` mixes
+`jax.nn.relu` (alias) with `jax.nn.dot_product_attention` (original
+implementation).
 
 This is a top-level package (`xera.functional`), separate from `xera.loom`
--- layers live in `loom`, plain functional ops live here.
+-- layers live in `loom`, plain functional ops live here. `Loss` used
+to live in the old `xera.weave` package; it's a plain functional
+namespace, so it belongs here now.
 
 Example:
-    >>> from xera.functional import relu, flash_sdpa
+    >>> from xera.functional import relu, flash_sdpa, Loss
     >>> x = relu(x)
     >>> out = flash_sdpa(q, k, v, causal=True)
+    >>> loss = Loss.CE(logits, labels)
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ from .activations import (
     tanh,
 )
 from .attention import flash_sdpa
+from .loss import Loss
 
 __all__ = [
     "celu",
@@ -76,4 +81,5 @@ __all__ = [
     "swish",
     "tanh",
     "flash_sdpa",
+    "Loss",
 ]

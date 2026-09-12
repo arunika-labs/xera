@@ -1,20 +1,20 @@
-"""Tests for xera.weave.optimizer.core: SGDMomentum, Adam, AdamW, Lion,
+"""Tests for xera.optimizer.core: SGDMomentum, Adam, AdamW, Lion,
 RMSprop, Adagrad, Adan, Adafactor, Shampoo, MuonCore, Muon."""
 
 import jax
 import jax.numpy as jnp
 import pytest
-import xera.weave as weave
-from xera.weave.optimizer.core.sgd import SGDMomentum, SGDMomentumState
-from xera.weave.optimizer.core.adam import Adam, AdamState, AdamW, AdamWState
-from xera.weave.optimizer.core.lion import Lion, LionState
-from xera.weave.optimizer.core.rmsprop import RMSprop, RMSpropState
-from xera.weave.optimizer.core.adagrad import Adagrad, AdagradState
-from xera.weave.optimizer.core.adan import Adan, AdanState
-from xera.weave.optimizer.core.adafactor import Adafactor, AdafactorState
-from xera.weave.optimizer.core.shampoo import Shampoo, ShampooState
-from xera.weave.optimizer.core.muon import MuonCore, MuonCoreState, Muon
-from xera.weave.optimizer.base import apply_updates
+import xera.optimizer as optimizer
+from xera.optimizer.core.sgd import SGDMomentum, SGDMomentumState
+from xera.optimizer.core.adam import Adam, AdamState, AdamW, AdamWState
+from xera.optimizer.core.lion import Lion, LionState
+from xera.optimizer.core.rmsprop import RMSprop, RMSpropState
+from xera.optimizer.core.adagrad import Adagrad, AdagradState
+from xera.optimizer.core.adan import Adan, AdanState
+from xera.optimizer.core.adafactor import Adafactor, AdafactorState
+from xera.optimizer.core.shampoo import Shampoo, ShampooState
+from xera.optimizer.core.muon import MuonCore, MuonCoreState, Muon
+from xera.optimizer.base import apply_updates
 
 
 def _quadratic_grads(params):
@@ -595,7 +595,7 @@ def test_muon_core_clip_bounds_direction_norm():
 
 
 def test_muon_wraps_into_partition_optimizer():
-    from xera.weave.optimizer.partition import Partition
+    from xera.optimizer.partition import Partition
     opt = Muon(lr=0.1)
     assert isinstance(opt, Partition)
 
@@ -646,16 +646,16 @@ def test_muon_reduces_quadratic_loss():
 
 
 # ---------------------------------------------------------------------------
-# Exposure from xera.weave / xera.O namespace
+# Exposure from xera.optimizer namespace
 # ---------------------------------------------------------------------------
 
-def test_all_core_optimizers_exposed_on_weave():
+def test_all_core_optimizers_exposed_on_optimizer_namespace():
     for name in ["SGDMomentum", "Adam", "AdamW", "Lion", "MuonCore", "Muon",
                  "RMSprop", "Adagrad", "Adan", "Adafactor", "Shampoo"]:
-        assert hasattr(weave, name)
+        assert hasattr(optimizer, name)
 
 
 def test_optimizer_base_class_is_common_ancestor():
-    from xera.weave.optimizer.base import Optimizer
+    from xera.optimizer.base import Optimizer
     for factory in ALL_2D_OPTIMIZER_FACTORIES.values():
         assert isinstance(factory(), Optimizer)

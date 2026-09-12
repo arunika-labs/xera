@@ -1,13 +1,13 @@
-"""Tests for xera.weave.optimizer.partition: Partition."""
+"""Tests for xera.optimizer.partition: Partition."""
 
 import jax
 import jax.numpy as jnp
 import pytest
-import xera.weave as weave
-from xera.weave.optimizer.partition import Partition, PartitionState
-from xera.weave.optimizer.core.sgd import SGDMomentum
-from xera.weave.optimizer.core.adam import Adam
-from xera.weave.optimizer.base import apply_updates
+import xera.optimizer as optimizer
+from xera.optimizer.partition import Partition, PartitionState
+from xera.optimizer.core.sgd import SGDMomentum
+from xera.optimizer.core.adam import Adam
+from xera.optimizer.base import apply_updates
 
 
 def _is_2d(path, leaf):
@@ -163,8 +163,8 @@ def test_partition_step_argument_forwarded_to_inner_optimizers():
     assert capturer.seen_steps == [42]
 
 
-def test_partition_accessible_from_weave_namespace():
-    assert weave.Partition is Partition
+def test_partition_accessible_from_optimizer_namespace():
+    assert optimizer.Partition is Partition
 
 
 def test_partition_jit_compatible():
