@@ -31,7 +31,8 @@ class Buffer:
         value: The wrapped value.
 
     Example:
-        >>> buffer = Buffer(jnp.zeros((10,)))
+        >>> import xera.loom as xl
+        >>> buffer = xl.Buffer(jnp.zeros((10,)))
         >>> # The buffer will be treated as a leaf in JAX tree operations
     """
 
@@ -72,12 +73,13 @@ class Module:
     implement the __call__ method for forward computation.
 
     Example:
-        >>> class MyLinear(Module):
+        >>> import xera.loom as xl
+        >>> class MyLinear(xl.Module):
         ...     in_features: int
         ...     out_features: int
         ...
         ...     def setup(self):
-        ...         self.weight = param(self.rng(), glorot_normal(),
+        ...         self.weight = xl.param(self.rng(), glorot_normal(),
         ...                           (self.in_features, self.out_features))
         ...
         ...     def __call__(self, x):
@@ -170,8 +172,8 @@ class Module:
 
         Example:
             >>> def setup(self):
-            ...     self.weight = param(self.rng(), normal(), (10, 20))
-            ...     self.bias = param(self.rng(), zeros(), (20,))
+            ...     self.weight = xl.param(self.rng(), normal(), (10, 20))
+            ...     self.bias = xl.param(self.rng(), zeros(), (20,))
         """
         pass
 
@@ -316,9 +318,10 @@ def param(key, init_fn, shape, dtype=jnp.float32):
         An initialized parameter array with the specified shape and dtype.
 
     Example:
+        >>> import xera.loom as xl
         >>> key = jax.random.PRNGKey(0)
-        >>> weight = param(key, initializers.xavier_normal(), (10, 20))
-        >>> bias = param(key, initializers.zeros(), (20,))
+        >>> weight = xl.param(key, initializers.xavier_normal(), (10, 20))
+        >>> bias = xl.param(key, initializers.zeros(), (20,))
     """
     return init_fn(key, shape, dtype)
 
