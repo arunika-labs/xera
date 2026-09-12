@@ -73,7 +73,8 @@ class SSM(Module):
         dt_max: Maximum time step for discretization (default: 0.1).
     
     Example:
-        >>> ssm = SSM(channels=64, state_dim=16)
+        >>> import xera.loom as xl
+        >>> ssm = xl.SSM(channels=64, state_dim=16)
         >>> output = ssm(input_sequence)  # shape: (batch, seq_len, channels)
     """
 
@@ -138,7 +139,8 @@ class SelectiveSSM(Module):
         dt_rank: Rank for the low-rank dt projection (default: d_inner // 16).
     
     Example:
-        >>> ssm = SelectiveSSM(d_inner=64, state_dim=16)
+        >>> import xera.loom as xl
+        >>> ssm = xl.SelectiveSSM(d_inner=64, state_dim=16)
         >>> output = ssm(input_sequence)
     """
 
@@ -222,7 +224,8 @@ class MambaBlock(Module):
         dt_rank: Rank for the low-rank dt projection (default: d_inner // 16).
     
     Example:
-        >>> mamba = MambaBlock(d_model=512, state_dim=16)
+        >>> import xera.loom as xl
+        >>> mamba = xl.MambaBlock(d_model=512, state_dim=16)
         >>> output = mamba(input_sequence)
     """
 
