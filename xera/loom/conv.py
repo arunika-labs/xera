@@ -67,7 +67,8 @@ class Conv(Module):
         use_bias: Whether to add a bias term (default: True).
     
     Example:
-        >>> conv = Conv(in_channels=3, out_channels=64, kernel_size=(3, 3))
+        >>> import xera.loom as xl
+        >>> conv = xl.Conv(in_channels=3, out_channels=64, kernel_size=(3, 3))
         >>> output = conv(input_tensor)
     """
 
@@ -142,7 +143,8 @@ class ConvTranspose(Module):
         use_bias: Whether to add a bias term (default: True).
     
     Example:
-        >>> deconv = ConvTranspose(in_channels=64, out_channels=3, kernel_size=(3, 3))
+        >>> import xera.loom as xl
+        >>> deconv = xl.ConvTranspose(in_channels=64, out_channels=3, kernel_size=(3, 3))
         >>> output = deconv(input_tensor)
     """
 
