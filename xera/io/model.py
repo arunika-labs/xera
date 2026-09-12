@@ -39,7 +39,8 @@ def save_model(module, path):
         path: The file path where the model should be saved.
     
     Example:
-        >>> save_model(my_model, "model.safetensors")
+        >>> import xera
+        >>> xera.io.save_model(my_model, "model.safetensors")
     """
     leaves_with_path, _ = jax.tree_util.tree_flatten_with_path(module)
     tensors = {_key(p): np.asarray(leaf) for p, leaf in leaves_with_path}
@@ -62,8 +63,9 @@ def load_model(template, path):
         A model instance with loaded parameters.
     
     Example:
+        >>> import xera
         >>> template = MyModel()  # Create empty model with same architecture
-        >>> loaded_model = load_model(template, "model.safetensors")
+        >>> loaded_model = xera.io.load_model(template, "model.safetensors")
     """
     leaves_with_path, treedef = jax.tree_util.tree_flatten_with_path(template)
     tensors = load_file(path)
