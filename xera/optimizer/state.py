@@ -30,7 +30,8 @@ class State:
     `Module` instances) as fields.
 
     Example:
-        >>> class Datasets(State):
+        >>> import xera.optimizer as xopt
+        >>> class Datasets(xopt.State):
         ...     x: jnp.ndarray = None
         ...     y: jnp.ndarray = None
         ...
@@ -38,7 +39,7 @@ class State:
         ...         noise = jax.random.normal(self.rng(), self.x.shape)
         ...         return self.x + 0.01 * noise
         ...
-        >>> class Trainer(State):
+        >>> class Trainer(xopt.State):
         ...     model: Module = None
         ...     data: Datasets = None
         ...     optimizer: "Optimizer" = None
@@ -131,7 +132,7 @@ class State:
         right after `setup()`, so instantiating the struct is enough to
         start it -- no separate `.run()` call needed:
 
-            >>> class Trainer(State):
+            >>> class Trainer(xopt.State):
             ...     def setup(self):
             ...         self.model = MyModel(key=self.rng())
             ...         self.optimizer = Adam(lr=1e-3)
