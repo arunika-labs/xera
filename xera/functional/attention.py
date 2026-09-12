@@ -18,10 +18,10 @@ deliberately just the public seam, same as `activations.py` is for the
 `jax.nn` activation aliases.
 
 Example:
-    >>> from xera.functional import flash_sdpa
-    >>> out = flash_sdpa(q, k, v, causal=True)
-    >>> out = flash_sdpa(q, k, v, causal=True, backend="jax")
-    >>> out = flash_sdpa(q, k, v, causal=True, verbose=True)  # print fallback reason, if any
+    >>> import xera.functional as F
+    >>> out = F.flash_sdpa(q, k, v, causal=True)
+    >>> out = F.flash_sdpa(q, k, v, causal=True, backend="jax")
+    >>> out = F.flash_sdpa(q, k, v, causal=True, verbose=True)  # print fallback reason, if any
 """
 
 from __future__ import annotations
