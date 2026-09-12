@@ -79,15 +79,16 @@ class Sequential(Module):
         layers: A list of Module instances to apply sequentially.
     
     Example:
-        >>> model = Sequential([
-        ...     Linear(784, 256),
-        ...     Linear(256, 128),
-        ...     Linear(128, 10)
+        >>> import xera.loom as xl
+        >>> model = xl.Sequential([
+        ...     xl.Linear(784, 256),
+        ...     xl.Linear(256, 128),
+        ...     xl.Linear(128, 10)
         ... ])
         >>> output = model(input_tensor)
 
         >>> # With stochastic and stateful layers, e.g. during eval:
-        >>> model = Sequential([Linear(64, 64), BatchNorm(dim=64), Dropout(rate=0.1)])
+        >>> model = xl.Sequential([Linear(64, 64), BatchNorm(dim=64), Dropout(rate=0.1)])
         >>> output, new_model = model(input_tensor, deterministic=True)
     """
     
@@ -139,7 +140,8 @@ class Residual(Module):
         inner: The module to wrap with a residual connection.
     
     Example:
-        >>> block = Residual(Linear(256, 256))
+        >>> import xera.loom as xl
+        >>> block = xl.Residual(xl.Linear(256, 256))
         >>> output = block(input_tensor)  # Applies Linear(x) + x
     """
 
@@ -185,7 +187,8 @@ class Lambda(Module):
         fn: The function to apply to the input.
     
     Example:
-        >>> custom_relu = Lambda(lambda x: jnp.maximum(0, x))
+        >>> import xera.loom as xl
+        >>> custom_relu = xl.Lambda(lambda x: jnp.maximum(0, x))
         >>> output = custom_relu(input_tensor)
     """
 
