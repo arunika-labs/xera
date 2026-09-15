@@ -212,10 +212,21 @@ class GroupNorm(Module):
             Normalized tensor of the same shape.
         """
         batch, *spatial, channels = x.shape
-        x_reshaped = x.reshape(batch, -1, self.num_groups, channels // self.num_groups)
-        mean = jnp.mean(x_reshaped, axis=1, keepdims=True)
-        var = jnp.var(x_reshaped, axis=1, keepdims=True)
-        xn = (x_reshaped - mean) / jnp.sqrt(var + self.eps)
+        group_size = channels // self.num_groups
+        # Contiguous grouping: channels [0:group_size) -> group 0,
+        # [group_size:2*group_size) -> group 1, etc. (matches PyTorch's
+        # nn.GroupNorm). After reshape, axes are:
+        #   0=batch, 1..n=spatial, n+1=num_groups, n+2=group_size
+        # Reduce over spatial axes and the in-group channel axis, but
+        # NOT the num_groups axis itself -- each group keeps its own
+        # mean/var.
+        x_grouped = x.reshape(batch, *spatial, self.num_groups, group_size)
+        n_spatial = len(spatial)
+        group_axis = 1 + n_spatial
+        reduce_axes = tuple(a for a in range(1, x_grouped.ndim) if a != group_axis)
+        mean = jnp.mean(x_grouped, axis=reduce_axes, keepdims=True)
+        var = jnp.var(x_grouped, axis=reduce_axes, keepdims=True)
+        xn = (x_grouped - mean) / jnp.sqrt(var + self.eps)
         xn = xn.reshape(x.shape)
         return xn * self.gamma + self.beta
 
